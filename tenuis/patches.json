@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "owner": "3x-haust/TenuisPi",
+  "upstream": "earendil-works/pi",
+  "upstreamBase": "e9e86e1c832de1edfff2d42041c8f9087d72a0cf",
+  "candidateRefPattern": "refs/heads/candidates/tenuispi/*",
+  "securityPatchSlaHours": 72,
+  "policy": {
+    "minimal": true,
+    "maxActivePatches": 12,
+    "mustDocumentSecurityBoundary": true,
+    "mustIncludeCompatibilityTest": true,
+    "mustRebaseBeforePromotion": true,
+    "forbidProductUiChanges": true,
+    "forbidCredentialPersistence": true,
+    "forbidAmbientToolEnablement": true,
+    "requiredPatchFields": [
+      "id",
+      "status",
+      "reason",
+      "securityBoundary",
+      "upstreamIssue",
+      "introducedAt",
+      "removeWhen",
+      "testCommand"
+    ]
+  },
+  "patches": []
+}

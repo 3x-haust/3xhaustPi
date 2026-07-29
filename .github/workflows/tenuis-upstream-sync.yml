@@ -1,0 +1,77 @@
+name: Tenuis upstream candidate
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: tenuis-upstream-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout standalone repository main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure upstream
+        run: |
+          git remote add upstream https://github.com/earendil-works/pi.git
+          git fetch --no-tags upstream main
+
+      - name: Report divergence and dependency changes
+        id: drift
+        shell: bash
+        run: |
+          echo "behind=$(git rev-list --count HEAD..upstream/main)" >> "$GITHUB_OUTPUT"
+          echo "ahead=$(git rev-list --count upstream/main..HEAD)" >> "$GITHUB_OUTPUT"
+          git diff --name-status HEAD...upstream/main -- package-lock.json packages/ai/package.json packages/agent/package.json packages/coding-agent/package.json > upstream-dependency-diff.txt
+          git log --oneline --no-merges HEAD..upstream/main > upstream-commits.txt
+
+      - name: Stop when already synchronized
+        if: steps.drift.outputs.behind == '0'
+        run: echo "Fork main already contains upstream/main."
+
+      - name: Create immutable candidate branch
+        if: steps.drift.outputs.behind != '0'
+        env:
+          BRANCH: candidates/tenuispi/upstream-${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git merge --no-edit upstream/main
+          git push origin "$BRANCH"
+
+      - name: Open candidate pull request
+        if: steps.drift.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: candidates/tenuispi/upstream-${{ github.run_id }}
+          BEHIND: ${{ steps.drift.outputs.behind }}
+          AHEAD: ${{ steps.drift.outputs.ahead }}
+        shell: bash
+        run: |
+          BODY=$(printf '%s\n\n%s\n\n%s\n' \
+            "Automated upstream candidate. This is not a stable promotion." \
+            "Upstream commits: $BEHIND; TenuisPi-only commits: $AHEAD." \
+            "Merge only after Tenuis compatibility, asset inventory, licensing, and security review receipts pass.")
+          gh pr create --base main --head "$BRANCH" --title "chore: evaluate upstream pi sync ($GITHUB_RUN_ID)" --body "$BODY"
+
+      - name: Upload drift evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upstream-drift-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            upstream-dependency-diff.txt
+            upstream-commits.txt
+          if-no-files-found: error
+          retention-days: 30
