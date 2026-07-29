@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "repository": {
     "name": "3x-haust/TenuisPi",
-    "lineage": "standalone-import",
+    "lineage": "standalone-source-port",
     "importedFrom": "earendil-works/pi",
     "upstreamCommit": "e9e86e1c832de1edfff2d42041c8f9087d72a0cf",
     "syncStrategy": "reviewed-source-candidate-pr",
