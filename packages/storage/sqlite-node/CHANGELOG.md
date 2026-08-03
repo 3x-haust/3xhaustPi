@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added bounded active-branch queries to the SQLite session reader.
+
+## [0.83.0] - 2026-07-29
+
 ## [0.82.1] - 2026-07-25
 
 ## [0.82.0] - 2026-07-24
