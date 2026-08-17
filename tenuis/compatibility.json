@@ -5,7 +5,7 @@
     "name": "3x-haust/TenuisPi",
     "lineage": "standalone-source-port",
     "importedFrom": "earendil-works/pi",
-    "upstreamCommit": "e9e86e1c832de1edfff2d42041c8f9087d72a0cf",
+    "upstreamCommit": "f47faf459f1a88ead70c3033b70931217251b4f3",
     "syncStrategy": "reviewed-source-candidate-pr",
     "stablePromotionRequiresExactCommitReceipt": true
   },
@@ -24,19 +24,27 @@
       "name": "@earendil-works/pi-ai",
       "workspace": "packages/ai",
       "version": "0.82.1",
-      "requiredExports": [".", "./oauth"]
+      "requiredExports": [
+        ".",
+        "./oauth"
+      ]
     },
     {
       "name": "@earendil-works/pi-agent-core",
       "workspace": "packages/agent",
       "version": "0.82.1",
-      "requiredExports": [".", "./node"]
+      "requiredExports": [
+        ".",
+        "./node"
+      ]
     },
     {
       "name": "@3x-haust/tenuis-pi-session",
       "workspace": "packages/tenuis-session",
       "version": "0.1.0",
-      "requiredExports": ["."]
+      "requiredExports": [
+        "."
+      ]
     }
   ],
   "embedding": {
