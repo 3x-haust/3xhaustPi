@@ -4,14 +4,13 @@
 만들지 못하게 분리한 로컬 coding runtime입니다. CLI/TUI와 Desktop app
 앱은 같은 `3xhaustpi/runtime` 패키지를 사용합니다.
 
-> 배포 상태: `3xhaustpi@0.1.0`의 pack/global-install과 native archive는
-> 로컬에서 검증됐지만, 2026-07-31 현재 npm public registry에는 아직
-> publish되지 않았습니다. 따라서 아래 public install 명령은 publish 전까지
-> registry에서 404가 납니다.
+> 배포 상태: `3xhaustpi@0.1.0`은 npm public registry에 게시됐습니다.
+> 2026-08-21 깨끗한 임시 global prefix에서 설치한 뒤 `--help`, `--version`,
+> 잘못된 옵션 거부와 72x24 TUI의 `• Ready`, `/help`, `/exit`를 검증했습니다.
 
 ## 1. 설치
 
-공개 배포 후 기본 설치 명령은 다음과 같습니다.
+기본 설치 명령은 다음과 같습니다.
 
 ```bash
 npm install -g 3xhaustpi
@@ -306,7 +305,7 @@ Use 15개 GUI application과 native manifest를 실제 확인합니다. 나머�
 
 같은 darwin-arm64 archive의 실제 Pi TUI에서 `/computer`를 입력해 현재
 실행 중인 15개 GUI application을 accessibility host로 조회했습니다. 증거는
-`../Tenuis/artifacts/native-tui-computer-use.txt`입니다.
+`../3xhaustdesktop/artifacts/native-tui-computer-use.txt`입니다.
 
 ## 11. troubleshooting
 
@@ -328,8 +327,6 @@ Use 15개 GUI application과 native manifest를 실제 확인합니다. 나머�
 
 ## 12. 정확한 미지원·미검증 범위
 
-- npm public registry publish와 외부 `npm install -g 3xhaustpi`: 2026-07-31
-  현재 package가 registry에 없어 미검증
 - windows-arm64, windows-x64 native archive의 실제 대상 머신 smoke
 - Windows UI Automation 외부 앱 Computer Use의 실제 대상 desktop action
   smoke
@@ -349,7 +346,7 @@ npm run build --workspace=3xhaustpi
 Desktop app:
 
 ```bash
-cd ../Tenuis
+cd ../3xhaustdesktop
 npm run typecheck
 npm test
 npm run build
