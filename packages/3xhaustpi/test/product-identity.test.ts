@@ -31,7 +31,7 @@ describe("product identity surfaces", () => {
 			.split("\n")
 			.map((line) => stripAnsi(line));
 		expect(output[0]).toBe(PRODUCT_DISPLAY_NAME);
-		expect(output).toContain(ASSISTANT_DISPLAY_NAME);
+		expect(output.some((line) => line.trim() === ASSISTANT_DISPLAY_NAME)).toBe(true);
 		expect(output.join("\n")).not.toContain(PRODUCT_MACHINE_NAME);
 	});
 

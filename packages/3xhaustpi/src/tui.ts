@@ -24,19 +24,27 @@ import { ASSISTANT_DISPLAY_NAME, PRODUCT_DISPLAY_NAME, PRODUCT_MACHINE_NAME } fr
 import { createProviderRuntime } from "./provider-runtime.ts";
 import { addMcpServer, loadMcpResources, renderResourceHub } from "./resource-hub.ts";
 import { ThreeXhaustState, type TuiRequest, type WorkspaceSnapshot } from "./state.ts";
+import {
+	accent,
+	cellWidth,
+	dim,
+	ellipsizeCells,
+	failure,
+	frameLine,
+	muted,
+	stripAnsi,
+	success,
+	text,
+	warning,
+} from "./tui-text.ts";
+import { fitTranscriptCards, formatSubmittedPromptTurn } from "./tui-transcript.ts";
+
+export { cellWidth, stripAnsi } from "./tui-text.ts";
+export type { TuiTranscriptRole, TuiTranscriptTemplate } from "./tui-transcript.ts";
+export { formatSubmittedPromptTurn, formatTranscriptEntry } from "./tui-transcript.ts";
 
 const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_MODEL = "gpt-5.6-terra";
-
-const ESC = "\u001b[";
-const tone = (code: number, value: string) => `${ESC}38;5;${code}m${value}${ESC}0m`;
-const accent = (value: string) => tone(111, value);
-const text = (value: string) => tone(255, value);
-const muted = (value: string) => tone(245, value);
-const dim = (value: string) => tone(239, value);
-const success = (value: string) => tone(114, value);
-const warning = (value: string) => tone(214, value);
-const failure = (value: string) => tone(203, value);
 
 export interface TuiViewState {
 	readonly projectRoot: string;
@@ -91,7 +99,7 @@ export function layoutTuiFrame(
 	const requestedAutocompleteRows = Math.max(0, Math.floor(options.autocompleteRows ?? 0));
 	const boundedAutocompleteRows = Math.min(requestedAutocompleteRows, Math.floor(height * 0.4));
 	const essentialChromeRows = 6;
-	const wantsContext = mode !== "degraded" && mode !== "minimal";
+	const wantsContext = width >= 60 && mode !== "degraded" && mode !== "minimal";
 	const contextRows = wantsContext && height - essentialChromeRows - boundedAutocompleteRows > 1 ? 1 : 0;
 	const chromeRows = essentialChromeRows + contextRows;
 	const autocompleteRows = Math.min(boundedAutocompleteRows, Math.max(0, height - chromeRows - 1));
@@ -126,90 +134,6 @@ export interface TuiDesktopHost {
 		action: DesktopComputerAction,
 		options?: { readonly signal?: AbortSignal },
 	): Promise<DesktopActionResult>;
-}
-
-function readAnsiSequence(value: string): string | undefined {
-	if (!value.startsWith(ESC)) return undefined;
-	const marker = value.indexOf("m", ESC.length);
-	if (marker === -1) return undefined;
-	const parameters = value.slice(ESC.length, marker);
-	return [...parameters].every((character) => (character >= "0" && character <= "9") || character === ";")
-		? value.slice(0, marker + 1)
-		: undefined;
-}
-
-export function stripAnsi(value: string): string {
-	let output = "";
-	let index = 0;
-	while (index < value.length) {
-		const sequence = readAnsiSequence(value.slice(index));
-		if (sequence) {
-			index += sequence.length;
-			continue;
-		}
-		const character = Array.from(value.slice(index))[0];
-		if (!character) break;
-		output += character;
-		index += character.length;
-	}
-	return output;
-}
-
-export function cellWidth(value: string): number {
-	let width = 0;
-	for (const character of value) {
-		const codePoint = character.codePointAt(0) ?? 0;
-		if (codePoint === 0 || codePoint < 32 || (codePoint >= 0x7f && codePoint < 0xa0)) continue;
-		if (
-			(codePoint >= 0x0300 && codePoint <= 0x036f) ||
-			(codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
-			(codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
-			(codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
-			(codePoint >= 0xfe00 && codePoint <= 0xfe0f)
-		) {
-			continue;
-		}
-		width +=
-			(codePoint >= 0x1100 && codePoint <= 0x115f) ||
-			(codePoint >= 0x2329 && codePoint <= 0x232a) ||
-			(codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
-			(codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
-			(codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-			(codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
-			(codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
-			(codePoint >= 0xff00 && codePoint <= 0xff60) ||
-			(codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
-			(codePoint >= 0x1f300 && codePoint <= 0x1faff)
-				? 2
-				: 1;
-	}
-	return width;
-}
-
-function clipAnsi(value: string, columns: number): string {
-	if (columns <= 0) return "";
-	let output = "";
-	let width = 0;
-	let index = 0;
-	let styled = false;
-	while (index < value.length) {
-		const remaining = value.slice(index);
-		const ansi = readAnsiSequence(remaining);
-		if (ansi) {
-			output += ansi;
-			styled = true;
-			index += ansi.length;
-			continue;
-		}
-		const character = Array.from(remaining)[0];
-		if (!character) break;
-		const characterWidth = cellWidth(character);
-		if (width + characterWidth > columns) break;
-		output += character;
-		width += characterWidth;
-		index += character.length;
-	}
-	return styled && !output.endsWith(`${ESC}0m`) ? `${output}${ESC}0m` : output;
 }
 
 function compactTokens(value: number): string {
@@ -252,12 +176,6 @@ export function resolveModelSelection(
 ): { readonly ok: true; readonly model: string } | { readonly ok: false; readonly message: string } {
 	const selected = models.find((candidate) => candidate.id === requestedModel);
 	return selected ? { ok: true, model: selected.id } : { ok: false, message: `Unknown model: ${requestedModel}` };
-}
-
-function ellipsizeCells(value: string, columns: number): string {
-	if (cellWidth(stripAnsi(value)) <= columns) return value;
-	if (columns <= 1) return clipAnsi(value, columns);
-	return `${clipAnsi(value, columns - 1)}…`;
 }
 
 export type TuiFooterSegmentId = "model" | "context" | "tasks" | "provider";
@@ -322,7 +240,7 @@ function segmentLineWidth(segments: readonly string[]): number {
 }
 
 export function formatStatusFooter(state: TuiViewState, columns = 120): string {
-	const ordered = orderedFooterSegments(state);
+	const ordered = orderedFooterSegments(state).filter((segment) => columns >= 60 || segment.id !== "provider");
 	const admitted: string[] = [];
 	for (const segment of ordered) {
 		const next = [...admitted, segment.compact];
@@ -392,144 +310,6 @@ function composerRail(state: TuiViewState, layout: TuiLayoutContract): readonly 
 	return [rule, frameLine(`${accent("›")} ${promptText}`, layout.columns), rule];
 }
 
-export type TuiTranscriptRole = "you" | "threeXhaust" | "tool" | "agent" | "system" | "error" | "approval";
-
-export interface TuiTranscriptTemplate {
-	readonly role: TuiTranscriptRole;
-	readonly label: string;
-	readonly content: string;
-}
-
-export function formatSubmittedPromptTurn(objective: string, inserted: boolean): string | undefined {
-	return inserted ? `You ${objective}` : undefined;
-}
-
-export function formatTranscriptEntry(value: string): TuiTranscriptTemplate {
-	const visible = stripAnsi(value).trimStart();
-	const without = (pattern: RegExp) => visible.replace(pattern, "").trimStart();
-	if (/^(You|User|사용자)\b/u.test(visible)) {
-		return { role: "you", label: text("you"), content: without(/^(You|User|사용자)\s*/u) };
-	}
-	const assistantPrefix = /^(3xhaustPi|3xhaustpi|3xhaust|Assistant)\b/u;
-	if (assistantPrefix.test(visible)) {
-		return {
-			role: "threeXhaust",
-			label: accent(ASSISTANT_DISPLAY_NAME),
-			content: without(/^(3xhaustPi|3xhaustpi|3xhaust|Assistant)\s*/u),
-		};
-	}
-	if (/^assistant\b/u.test(visible)) {
-		return { role: "threeXhaust", label: accent(ASSISTANT_DISPLAY_NAME), content: without(/^assistant\s*/u) };
-	}
-	if (
-		/^(Patch ready|Press y|Computer action ready|✓ Patch approved|✓ Computer action approved|Patch rejected)\b/u.test(
-			visible,
-		)
-	) {
-		return { role: "approval", label: warning("review"), content: visible };
-	}
-	if (/^(?:Error:|Computer Use:|Unknown command:)/u.test(visible)) {
-		return { role: "error", label: failure("error"), content: visible };
-	}
-	if (/^(?:tool|capability|◇ model)\b|^[✓×]/u.test(visible))
-		return { role: "tool", label: muted("tool"), content: visible };
-	if (/^(agent|chat|Intent →)\b/u.test(visible)) return { role: "agent", label: muted("agent"), content: visible };
-	return { role: "system", label: dim("system"), content: visible };
-}
-
-function wrapPlainLine(value: string, columns: number): string[] {
-	const width = Math.max(1, columns);
-	if (cellWidth(value) <= width) return [value];
-	const lines: string[] = [];
-	let line = "";
-	let used = 0;
-	const pushLine = () => {
-		lines.push(line);
-		line = "";
-		used = 0;
-	};
-	for (const token of value.match(/\S+\s*|\s+/gu) ?? [value]) {
-		const tokenWidth = cellWidth(token);
-		if (tokenWidth <= width && used > 0 && used + tokenWidth > width) pushLine();
-		if (tokenWidth <= width) {
-			line += token;
-			used += tokenWidth;
-			continue;
-		}
-		for (const character of token) {
-			const characterWidth = cellWidth(character);
-			if (used > 0 && used + characterWidth > width) pushLine();
-			line += character;
-			used += characterWidth;
-		}
-	}
-	lines.push(line);
-	return lines;
-}
-
-function frameLine(value: string, columns: number): string {
-	return clipAnsi(value, columns);
-}
-
-function messageCard(value: string, columns: number): string[] {
-	const { role, label, content } = formatTranscriptEntry(value);
-	const source = content || stripAnsi(value);
-	if (role === "you" || role === "threeXhaust") {
-		const bodyIndent = "  ";
-		const contentWidth = Math.max(1, columns - cellWidth(bodyIndent));
-		const rows = source
-			.split("\n")
-			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
-			.map((line) => `${bodyIndent}${line}`);
-		return [label, ...rows, ""];
-	}
-	if (role === "system") {
-		const prefix = "• ";
-		const continuation = "  ";
-		const contentWidth = Math.max(1, columns - cellWidth(prefix));
-		const rows = source.split("\n").flatMap((physical) => wrapPlainLine(physical, contentWidth));
-		return rows.map((line, index) => dim(`${index === 0 ? prefix : continuation}${line}`));
-	}
-	if (role === "agent" || role === "tool") {
-		const prefix = `  ${dim(role === "agent" ? "├" : "└")} `;
-		const continuation = "    ";
-		const contentWidth = Math.max(1, columns - cellWidth(prefix));
-		const rows = source.split("\n").flatMap((physical) => wrapPlainLine(physical, contentWidth));
-		return rows.map((line, index) => `${index === 0 ? prefix : continuation}${line}`);
-	}
-	const prefix = `${label} ${dim("│")} `;
-	const continuation = `${" ".repeat(cellWidth(stripAnsi(label)))} ${dim("│")} `;
-	const contentWidth = Math.max(1, columns - cellWidth(stripAnsi(prefix)));
-	const rows = source.split("\n").flatMap((physical) => wrapPlainLine(physical, contentWidth));
-	return rows.map((line, index) => `${index === 0 ? prefix : continuation}${line}`);
-}
-
-function fitTranscriptCards(entries: readonly string[], columns: number, budget: number): string[] {
-	const visibleCards: string[][] = [];
-	let remaining = Math.max(0, budget);
-	for (let index = entries.length - 1; index >= 0 && remaining > 0; index -= 1) {
-		const entry = entries[index];
-		if (entry === undefined) continue;
-		const card = messageCard(entry, columns);
-		if (card.length <= remaining) {
-			visibleCards.unshift(card);
-			remaining -= card.length;
-			continue;
-		}
-		if (visibleCards.length === 0) {
-			const first = card[0] ?? "";
-			const hasTrailingGap = card.at(-1) === "" && remaining > 1;
-			const body = card.slice(1, hasTrailingGap ? -1 : undefined);
-			const bodyBudget = Math.max(0, remaining - 1 - (hasTrailingGap ? 1 : 0));
-			const visibleBody = bodyBudget > 0 ? body.slice(-bodyBudget) : [];
-			visibleCards.unshift([first, ...visibleBody, ...(hasTrailingGap ? [""] : [])]);
-			remaining = 0;
-		}
-		break;
-	}
-	return visibleCards.flat();
-}
-
 export function transcriptViewportRows(
 	rows: number,
 	reservedRows = 0,
@@ -569,9 +349,9 @@ export function renderTuiFrame(
 	state: TuiViewState,
 	columns = 120,
 	rows = 36,
-	_options: { readonly autocompleteRows?: number } = {},
+	options: { readonly autocompleteRows?: number } = {},
 ): string {
-	const layout = layoutTuiFrame(columns, rows);
+	const layout = layoutTuiFrame(columns, rows, options);
 	const footer = frameLine(formatStatusFooter(state, layout.columns), layout.columns);
 	const activity = frameLine(
 		formatTuiActivityLine({
@@ -593,6 +373,7 @@ export function renderTuiFrame(
 		identityRail(state, layout),
 		...(layout.contextRows ? [contextRail(layout)] : []),
 		...paddedTranscript,
+		...Array.from({ length: layout.autocompleteRows }, () => ""),
 		activity,
 		...composerRail(state, layout),
 		footer,
@@ -742,6 +523,7 @@ export async function runTui(input: {
 	const editor = new Editor(ui, editorTheme(), {
 		paddingX: 1,
 		autocompletePresentation: "overlay",
+		placeholder: muted("Ask anything, or type /help"),
 		promptPrefix: `${accent("›")} `,
 		submitSlashArgumentCompletions: true,
 	});

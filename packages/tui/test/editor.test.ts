@@ -39,6 +39,23 @@ async function flushAutocomplete(): Promise<void> {
 }
 
 describe("Editor component", () => {
+	describe("Placeholder", () => {
+		it("renders only while the editor is empty", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme, {
+				placeholder: "Ask anything",
+				promptPrefix: "› ",
+			});
+
+			const empty = editor.render(40).map(stripVTControlCharacters).join("\n");
+			assert.match(empty, /› {2}Ask anything/u);
+
+			editor.setText("inspect src");
+			const populated = editor.render(40).map(stripVTControlCharacters).join("\n");
+			assert.doesNotMatch(populated, /Ask anything/u);
+			assert.match(populated, /› inspect src/u);
+		});
+	});
+
 	describe("Prompt history navigation", () => {
 		it("does nothing on Up arrow when history is empty", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);

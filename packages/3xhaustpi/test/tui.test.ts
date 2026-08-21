@@ -149,6 +149,16 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(wideFooter).not.toContain("…/project");
 	});
 
+	it("removes command hints and provider metadata below sixty columns", () => {
+		const output = visibleLines(renderTuiFrame(state, 56, 22));
+		const footer = output.at(-1) ?? "";
+
+		expect(output.join("\n")).not.toContain("/help  /model  /exit");
+		expect(footer).toContain("gpt-5.6-terra:medium");
+		expect(footer).toContain("35K/400K");
+		expect(footer).not.toContain("openai-codex");
+	});
+
 	it("never admits a lower-priority footer segment after a higher one cannot fit", () => {
 		const footer = stripAnsi(formatStatusFooter(state, 26));
 		expect(footer).toContain("gpt-5.6-terra:medium");
@@ -187,14 +197,145 @@ describe("Pi-native event-driven TUI renderer", () => {
 				18,
 			),
 		);
-		const userHeader = output.indexOf("you");
-		const assistantHeader = output.indexOf("3xhaust", userHeader + 1);
+		const userHeader = output.indexOf("  You");
+		const assistantHeader = output.indexOf("  3xhaust", userHeader + 1);
 		expect(userHeader).toBeGreaterThanOrEqual(0);
 		expect(assistantHeader).toBeGreaterThan(userHeader);
-		expect(output[userHeader + 1]).toMatch(/^ {2}Please inspect/u);
-		expect(output[assistantHeader + 1]).toMatch(/^ {2}The callback/u);
+		expect(output[userHeader + 1]).toMatch(/^ {4}Please inspect/u);
+		expect(output[assistantHeader + 1]).toMatch(/^ {4}The callback/u);
 		expect(output.slice(userHeader, assistantHeader + 2).join("\n")).not.toContain("│");
 		expect(output.slice(userHeader + 1, assistantHeader)).toContain("");
+	});
+
+	it("renders dense coding-chat turns with outer gutter and attached tool activity", () => {
+		// Given
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: [
+						"You Inspect the authentication callback.",
+						"3xhaust The expired session is rejected before token rotation.",
+						"✓ readRanges  42.5 ms · src/auth.ts inspected",
+					],
+					queuedRequests: [],
+				},
+				72,
+				18,
+			),
+		);
+
+		// When
+		const userHeader = output.indexOf("  You");
+		const assistantHeader = output.indexOf("  3xhaust");
+		const toolRow = output.findIndex((line) => line.startsWith("    └ ✓ readRanges"));
+
+		// Then
+		expect(userHeader).toBeGreaterThanOrEqual(0);
+		expect(output[userHeader + 1]).toBe("    Inspect the authentication callback.");
+		expect(output[userHeader + 2]).toBe("");
+		expect(assistantHeader).toBe(userHeader + 3);
+		expect(output[assistantHeader + 1]).toBe("    The expired session is rejected before token rotation.");
+		expect(toolRow).toBe(assistantHeader + 2);
+	});
+
+	it("reparents pre-response tool activity beneath the final assistant header", () => {
+		// Given
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: [
+						"You Read the project summary.",
+						"✓ readRanges  0.1 ms · Read 1 disclosed document",
+						"3xhaust The project summary is available.",
+					],
+					queuedRequests: [],
+				},
+				72,
+				18,
+			),
+		);
+
+		// When
+		const assistantHeader = output.indexOf("  3xhaust");
+		const toolRow = output.findIndex((line) => line.startsWith("    └ ✓ readRanges"));
+
+		// Then
+		expect(assistantHeader).toBeGreaterThanOrEqual(0);
+		expect(toolRow).toBe(assistantHeader + 1);
+		expect(output[toolRow + 1]).toBe("    The project summary is available.");
+	});
+
+	it("owns intermediate tool activity with a provisional assistant header", () => {
+		// Given
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: ["You Read the project summary.", "✓ readRanges  0.1 ms · Read 1 disclosed document"],
+					queuedRequests: [],
+				},
+				72,
+				18,
+			),
+		);
+
+		// When
+		const assistantHeader = output.indexOf("  3xhaust");
+		const toolRow = output.findIndex((line) => line.startsWith("    └ ✓ readRanges"));
+
+		// Then
+		expect(assistantHeader).toBeGreaterThanOrEqual(0);
+		expect(toolRow).toBe(assistantHeader + 1);
+	});
+
+	it("keeps runtime notices out of the primary transcript when chat turns exist", () => {
+		// Given
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: [
+						"Background recovery completed",
+						"You Continue the interrupted task.",
+						"3xhaust I restored the last durable checkpoint.",
+					],
+					queuedRequests: [],
+				},
+				72,
+				18,
+			),
+		).join("\n");
+
+		// When / Then
+		expect(output).toContain("Continue the interrupted task.");
+		expect(output).toContain("I restored the last durable checkpoint.");
+		expect(output).not.toContain("Background recovery completed");
+	});
+
+	it("caps wide chat prose while preserving the terminal gutter", () => {
+		// Given
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: [`3xhaust ${"compact readable prose ".repeat(16)}`],
+					queuedRequests: [],
+				},
+				120,
+				20,
+			),
+		);
+
+		// When
+		const assistantHeader = output.indexOf("   3xhaust");
+		const bodyRows = output.slice(assistantHeader + 1).filter((line) => line.startsWith("     "));
+
+		// Then
+		expect(assistantHeader).toBeGreaterThanOrEqual(0);
+		expect(bodyRows.length).toBeGreaterThan(1);
+		for (const line of bodyRows) expect(cellWidth(line)).toBeLessThanOrEqual(101);
 	});
 
 	it("never renders an orphaned conversation body when an older turn does not fit", () => {
@@ -209,7 +350,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 				12,
 			),
 		).join("\n");
-		expect(output).toContain("3xhaust\n  latest answer");
+		expect(output).toContain("  3xhaust\n    latest answer");
 		expect(output).not.toContain("ORPHAN_MARKER");
 	});
 
@@ -225,9 +366,9 @@ describe("Pi-native event-driven TUI renderer", () => {
 				14,
 			),
 		);
-		const notice = output.findIndex((line) => line.startsWith("• A durable notice"));
+		const notice = output.findIndex((line) => line.startsWith("  • A durable notice"));
 		expect(notice).toBeGreaterThanOrEqual(0);
-		expect(output[notice + 1]).toMatch(/^ {2}wrap cleanly/u);
+		expect(output[notice + 1]).toMatch(/^ {4}wrap cleanly/u);
 		expect(output.join("\n")).not.toContain("system │");
 	});
 
@@ -385,6 +526,49 @@ describe("Pi-native event-driven TUI renderer", () => {
 		}
 	});
 
+	it("keeps complete CJK chat cards across the full responsive matrix", () => {
+		for (const [columns, rows] of [
+			[20, 8],
+			[32, 10],
+			[40, 12],
+			[56, 22],
+			[72, 24],
+			[80, 24],
+			[120, 32],
+		] as const) {
+			// Given
+			const output = visibleLines(
+				renderTuiFrame(
+					{
+						...state,
+						messages: [
+							"You 오래된 요청은 헤더와 본문이 함께 보일 때만 유지됩니다.",
+							"3xhaust 최신 응답은 한글日本語中文 혼합 문장을 셀 경계에서 안전하게 줄바꿈합니다.",
+						],
+						queuedRequests: [],
+					},
+					columns,
+					rows,
+				),
+			);
+
+			// When
+			const rendered = output.join("\n");
+			const gutter = columns >= 96 ? "   " : "  ";
+			const assistantHeader = output.indexOf(`${gutter}3xhaust`);
+			const olderBodyVisible = rendered.includes("오래된 요청");
+
+			// Then
+			expectFrameWithin(output.join("\n"), columns, rows);
+			expect(assistantHeader, `${columns}x${rows} must preserve the assistant header`).toBeGreaterThanOrEqual(0);
+			expect(
+				output.slice(assistantHeader + 1).some((line) => line.startsWith(`${gutter}  `)),
+				`${columns}x${rows} must preserve an assistant body row`,
+			).toBe(true);
+			if (olderBodyVisible) expect(rendered).toContain(`${gutter}You`);
+		}
+	});
+
 	it("shows an empty-composer affordance in the reusable status row", () => {
 		expect(stripAnsi(formatTuiStatusLine("ready", "", 0))).toContain("ready  type a message or /help");
 		expect(formatTuiStatusLine("running", "planning…", 1)).not.toContain("type a message");
@@ -470,6 +654,29 @@ describe("Pi-native event-driven TUI renderer", () => {
 					closed.findIndex((line) => line.includes(needle)),
 				);
 			}
+		}
+	});
+
+	it("reserves covered transcript rows for a bounded autocomplete overlay", () => {
+		// Given
+		const overlayState = {
+			...state,
+			messages: Array.from({ length: 20 }, (_, index) => `3xhaust turn ${index + 1}`),
+			queuedRequests: [],
+		};
+
+		// When
+		const closed = visibleLines(renderTuiFrame(overlayState, 72, 24));
+		const open = visibleLines(renderTuiFrame(overlayState, 72, 24, { autocompleteRows: 6 }));
+
+		// Then
+		expect(closed).toContain("    turn 16");
+		expect(open).not.toContain("    turn 16");
+		expect(open).toContain("    turn 20");
+		for (const needle of ["3xhaustPi", "ready  type a message", "›", "gpt-5.6-terra"] as const) {
+			expect(open.findIndex((line) => line.includes(needle))).toBe(
+				closed.findIndex((line) => line.includes(needle)),
+			);
 		}
 	});
 });

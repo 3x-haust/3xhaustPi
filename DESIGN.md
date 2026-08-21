@@ -1,43 +1,5 @@
 # 3xhaustPi Native TUI Design System
 
-## 0. Research Log
-
-3xhaustPi is an existing terminal product being redesigned from verified public
-coding-harness patterns rather than copied from one brand.
-
-- **OMP / oh-my-pi:** bounded model overlays, composable status segments,
-  deterministic transcript grouping, expandable tool output, agent roster, and
-  ANSI/CJK width as a component contract.
-- **GJC / gajae-code:** explicit pending/done/error tool states, bounded
-  expansion with honest truncation, dedicated task surfaces, and ANSI-preserving
-  narrow/medium/wide visual QA.
-- **OmO beta / Senpi:** semantic modes, visible orchestration, named specialist
-  activity, and short commands that activate substantial workflows.
-- **OpenAI Codex CLI:** composer-first shell, structured execution cells,
-  focused overlays, persistent compact status, and explicit resize/reflow
-  architecture.
-- **OpenCode:** strongest progressive disclosure policy; hide low-priority
-  footer segments before core model, context, and activity state.
-- **Crush:** searchable command palette, model/session discoverability,
-  permission visibility, and compact mode.
-- **Aider:** transcript-first readability, operational controls kept behind
-  commands, token/context detail on demand, and strong keyboard conventions.
-- **Gemini CLI / Claude Code / Goose / Plandex:** discoverable tools and context,
-  customizable status, provider/extension health, and durable plan/session
-  state.
-- **Linear reference:** precision, restrained accent color, hierarchy through
-  luminance rather than decoration, and keyboard-first operational density.
-- **StyleGallery contracts:** `scroll-body-shell` owns vertical transcript
-  scrolling; `feed` gives semantic transcript rhythm; `cluster` governs
-  independently hideable status segments; `imposter` describes bounded focused
-  pickers without displacing the shell.
-- **Baseline audit:** the old shell duplicated the project name, exposed a
-  static help row at every width, used unrelated width/height constants, and
-  allowed static/live layout drift. The transcript was safe but visually flat,
-  and tool/agent events read as an undifferentiated system log.
-- **Skipped:** browser-only lazyweb and Lighthouse workflows do not represent a
-  native terminal surface. Real PTY captures and ANSI/CJK review replace them.
-
 ## 1. Atmosphere & Identity
 
 3xhaustPi should feel like a quiet, precise instrument: native to the terminal,
@@ -122,7 +84,7 @@ One terminal cell horizontally and one terminal row vertically.
 
 ### Grid
 
-The root follows StyleGallery `scroll-body-shell`:
+The root uses one vertical shell:
 
 1. **Identity rail:** fixed, one row.
 2. **Context rail:** optional, one row in roomy modes.
@@ -157,7 +119,7 @@ Height is also a first-class constraint:
 
 - The transcript is the sole vertical scroll owner.
 - Header, composer, active state, and status remain visible during interaction.
-- Status segments are independent `cluster` items with explicit priority.
+- Status segments are independent items with explicit priority.
 - Empty space is intentional breathing room, not filled with permanent panels.
 - A focused picker is bounded to at most 40% of terminal height.
 
@@ -334,8 +296,8 @@ sibling; it never leaves a stale target.
 
 ### Command / Model Picker
 
-- Uses Pi's existing `showOverlay()` compositor and follows the `imposter`
-  contract; it does not consume transcript rows.
+- Uses the existing `showOverlay()` compositor with a bounded overlay contract;
+  it does not consume transcript rows.
 - Searchable, keyboard-first, active selection obvious.
 - Keeps transcript, identity, composer, and footer stable.
 - Model changes are visibly session-scoped.

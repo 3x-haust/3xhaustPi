@@ -234,6 +234,7 @@ export interface EditorOptions {
 	paddingX?: number;
 	autocompleteMaxVisible?: number;
 	autocompletePresentation?: "inline" | "overlay";
+	placeholder?: string;
 	promptPrefix?: string;
 	submitSlashArgumentCompletions?: boolean;
 }
@@ -338,6 +339,7 @@ export class Editor implements Component, Focusable {
 	private autocompletePresentation: "inline" | "overlay" = "inline";
 	private autocompleteOverlayHandle?: OverlayHandle;
 	private promptPrefix = "";
+	private placeholder = "";
 	private submitSlashArgumentCompletions = false;
 
 	// Paste tracking for large pastes
@@ -386,6 +388,7 @@ export class Editor implements Component, Focusable {
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 		this.autocompletePresentation = options.autocompletePresentation ?? "inline";
+		this.placeholder = options.placeholder ?? "";
 		this.promptPrefix = options.promptPrefix ?? "";
 		this.submitSlashArgumentCompletions = options.submitSlashArgumentCompletions ?? false;
 	}
@@ -557,6 +560,8 @@ export class Editor implements Component, Focusable {
 
 		// Get visible lines slice
 		const visibleLines = layoutLines.slice(this.scrollOffset, this.scrollOffset + maxVisibleLines);
+		const placeholderVisible =
+			this.placeholder.length > 0 && this.state.lines.length === 1 && this.state.lines[0] === "";
 
 		const result: string[] = [];
 		const leftPadding = " ".repeat(paddingX);
@@ -581,35 +586,42 @@ export class Editor implements Component, Focusable {
 				this.promptPrefix && this.scrollOffset + visibleIndex === 0
 					? this.promptPrefix
 					: " ".repeat(promptPrefixWidth);
-			let displayText = layoutLine.text;
-			let lineVisibleWidth = visibleWidth(layoutLine.text);
+			let displayText =
+				placeholderVisible && this.scrollOffset + visibleIndex === 0 ? this.placeholder : layoutLine.text;
+			let lineVisibleWidth = visibleWidth(displayText);
 			let cursorInPadding = false;
 
 			// Add cursor if this line has it
 			if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
-				const before = displayText.slice(0, layoutLine.cursorPos);
-				const after = displayText.slice(layoutLine.cursorPos);
-
-				// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
-				const marker = emitCursorMarker ? CURSOR_MARKER : "";
-
-				if (after.length > 0) {
-					// Cursor is on a character (grapheme) - replace it with highlighted version
-					// Get the first grapheme from 'after'
-					const afterGraphemes = [...this.segment(after, "grapheme")];
-					const firstGrapheme = afterGraphemes[0]?.segment || "";
-					const restAfter = after.slice(firstGrapheme.length);
-					const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
-					displayText = before + marker + cursor + restAfter;
-					// lineVisibleWidth stays the same - we're replacing, not adding
+				if (placeholderVisible) {
+					const marker = emitCursorMarker ? CURSOR_MARKER : "";
+					displayText = `${marker}\x1b[7m \x1b[0m${displayText}`;
+					lineVisibleWidth += 1;
 				} else {
-					// Cursor is at the end - add highlighted space
-					const cursor = "\x1b[7m \x1b[0m";
-					displayText = before + marker + cursor;
-					lineVisibleWidth = lineVisibleWidth + 1;
-					// If cursor overflows content width into the padding, flag it
-					if (lineVisibleWidth > textContentWidth && paddingX > 0) {
-						cursorInPadding = true;
+					const before = displayText.slice(0, layoutLine.cursorPos);
+					const after = displayText.slice(layoutLine.cursorPos);
+
+					// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
+					const marker = emitCursorMarker ? CURSOR_MARKER : "";
+
+					if (after.length > 0) {
+						// Cursor is on a character (grapheme) - replace it with highlighted version
+						// Get the first grapheme from 'after'
+						const afterGraphemes = [...this.segment(after, "grapheme")];
+						const firstGrapheme = afterGraphemes[0]?.segment || "";
+						const restAfter = after.slice(firstGrapheme.length);
+						const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
+						displayText = before + marker + cursor + restAfter;
+						// lineVisibleWidth stays the same - we're replacing, not adding
+					} else {
+						// Cursor is at the end - add highlighted space
+						const cursor = "\x1b[7m \x1b[0m";
+						displayText = before + marker + cursor;
+						lineVisibleWidth = lineVisibleWidth + 1;
+						// If cursor overflows content width into the padding, flag it
+						if (lineVisibleWidth > textContentWidth && paddingX > 0) {
+							cursorInPadding = true;
+						}
 					}
 				}
 			}
