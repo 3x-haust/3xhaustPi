@@ -189,10 +189,10 @@ bounded observation으로 읽고, Electron의 Desktop surface가 같은 host를
 사용합니다. 실제 격리 Calculator 프로세스에서 26개 element 관찰,
 accessibility `AXPress`, action 뒤 digest 변경, renderer가 만든 가짜 좌표
 approval 차단을 검증했습니다. 증거는
-`../Tenuis/artifacts/native-desktop-computer-use.json`과
-`../Tenuis/artifacts/g044-native-desktop-computer-use.png`입니다.
+`../3xhaustdesktop/artifacts/native-desktop-computer-use.json`과
+`../3xhaustdesktop/artifacts/g044-native-desktop-computer-use.png`입니다.
 Pi TUI의 앱 목록→관찰→검토→semantic action 흐름은
-`../Tenuis/artifacts/g045-tui-computer-use.png`로 검증했습니다.
+`../3xhaustdesktop/artifacts/g045-tui-computer-use.png`로 검증했습니다.
 
 Windows는 UI Automation PowerShell host, Linux는 AT-SPI 2 Python host를 같은
 `desktop-runtime` 경계에 연결했습니다. 두 adapter 모두 앱 목록, bounded
@@ -204,9 +204,9 @@ Ubuntu 24.04의 Xvfb/D-Bus/GTK 3/AT-SPI 2 세션에서 실제 `Run` button을
 accessibility로 눌러 `Completed` 상태와 digest 변경까지 검증했습니다.
 x64 bundled Node도 `linux/x64`를 직접 보고했습니다. Windows 실제 desktop
 action은 아직 미검증입니다. 증거는
-`../Tenuis/artifacts/cross-platform-computer-use.json`과
-`../Tenuis/artifacts/native-linux-atspi-computer-use.json`,
-`../Tenuis/artifacts/native-linux-x64-atspi-computer-use.json`입니다.
+`../3xhaustdesktop/artifacts/cross-platform-computer-use.json`과
+`../3xhaustdesktop/artifacts/native-linux-atspi-computer-use.json`,
+`../3xhaustdesktop/artifacts/native-linux-x64-atspi-computer-use.json`입니다.
 
 ## 8. 실제 benchmark
 
@@ -244,7 +244,7 @@ direct-tool보다 model-side end-to-end latency와 throughput이 느렸습니다
 
 Desktop app Performance 화면도 이 corpus metadata와 실제 acceptance를
 직접 읽습니다. GUI 검증 캡처는
-`../Tenuis/artifacts/g035-real-benchmark-gui.png`입니다.
+`../3xhaustdesktop/artifacts/g035-real-benchmark-gui.png`입니다.
 
 local read executor는 동일 400 samples에서 TypeScript/Python 1/4/8 모두
 tool success 100%, capability cache 99%, output mismatch 0이었습니다. provider를
@@ -264,11 +264,11 @@ Electron actual-provider E2E는 OAuth account route, MCP/Skill/Memory context,
 patch proposal/approval, utility process `SIGKILL`, resume, diagnostics와 FIFO
 follow-up을 한 흐름에서 검증했습니다. 최신 실행은 provider call 3회, tool
 call 3/3 성공, tool duration 368.6 ms였습니다. 집계 증거는
-`../Tenuis/artifacts/performance-comparison.json`, TUI kill/restart 캡처는
-`../Tenuis/artifacts/g042-tui-durable-queue.png`, project/chat 전환 캡처는
-`../Tenuis/artifacts/g043-tui-project-chat-navigation.png`입니다. TUI worker를
+`../3xhaustdesktop/artifacts/performance-comparison.json`, TUI kill/restart 캡처는
+`../3xhaustdesktop/artifacts/g042-tui-durable-queue.png`, project/chat 전환 캡처는
+`../3xhaustdesktop/artifacts/g043-tui-project-chat-navigation.png`입니다. TUI worker를
 통한 실제 `openai-codex/gpt-5.6-terra` 조사 작업 transcript는
-`../Tenuis/artifacts/tui-worker-real-llm.txt`에 보존했습니다.
+`../3xhaustdesktop/artifacts/tui-worker-real-llm.txt`에 보존했습니다.
 
 ## 9. update
 

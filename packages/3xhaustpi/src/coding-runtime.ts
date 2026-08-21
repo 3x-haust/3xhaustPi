@@ -1,7 +1,18 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	type Stats,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import {
 	type PatchProposal,
@@ -49,6 +60,8 @@ export interface CodingTaskInput {
 	readonly model?: string;
 	readonly credential?: string;
 	readonly sessionId?: string;
+	/** Use only non-executing diagnostics and never run validation scripts from the project. */
+	readonly strict?: boolean;
 	/** @deprecated Independent full-context tasks always release continuation resources. */
 	readonly preserveProviderSession?: boolean;
 	readonly signal?: AbortSignal;
@@ -228,6 +241,8 @@ export interface ResumeCodingTaskInput {
 	readonly sessionId?: string;
 	readonly projectRoot?: string;
 	readonly credential?: string;
+	/** Use only non-executing diagnostics and never run validation scripts from the project. */
+	readonly strict?: boolean;
 	readonly preserveProviderSession?: boolean;
 	readonly signal?: AbortSignal;
 	readonly onEvent?: (event: CodingTaskEvent) => void;
@@ -372,6 +387,83 @@ function renderPatch(proposal: PatchProposal, documents: ReadonlyMap<string, Pro
 	return lines.join("\n");
 }
 
+interface SecureProjectRoot {
+	readonly path: string;
+	readonly device: number;
+	readonly inode: number;
+}
+
+function secureProjectRoot(projectRoot: string): SecureProjectRoot {
+	const path = realpathSync(projectRoot);
+	const stats = statSync(path);
+	if (!stats.isDirectory()) throw new Error(`Project root is not a directory: ${projectRoot}`);
+	return { path, device: stats.dev, inode: stats.ino };
+}
+
+function isPathContained(root: string, path: string): boolean {
+	const fromRoot = relative(root, path);
+	return fromRoot === "" || (!isAbsolute(fromRoot) && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`));
+}
+
+function verifyProjectRoot(root: SecureProjectRoot): void {
+	const stats = statSync(root.path);
+	if (realpathSync(root.path) !== root.path || stats.dev !== root.device || stats.ino !== root.inode) {
+		throw new Error("Project root changed while applying the patch");
+	}
+}
+
+function lstatIfExists(path: string): Stats | undefined {
+	try {
+		return lstatSync(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+function verifyPatchPath(root: SecureProjectRoot, path: string): Stats | undefined {
+	verifyProjectRoot(root);
+	if (!isPathContained(root.path, path) || path === root.path) {
+		throw new Error(`Patch target escapes the project: ${path}`);
+	}
+	const fromRoot = relative(root.path, path);
+	let current = root.path;
+	let targetStats: Stats | undefined;
+	for (const component of fromRoot.split(sep)) {
+		current = join(current, component);
+		const stats = lstatIfExists(current);
+		if (!stats) break;
+		if (stats.isSymbolicLink()) throw new Error(`Patch target contains a symbolic link: ${current}`);
+		targetStats = current === path ? stats : undefined;
+	}
+	let existing = path;
+	while (!lstatIfExists(existing) && existing !== root.path) existing = dirname(existing);
+	const canonicalExisting = realpathSync(existing);
+	if (!isPathContained(root.path, canonicalExisting)) {
+		throw new Error(`Patch target resolves outside the project: ${path}`);
+	}
+	return targetStats;
+}
+
+function ensurePatchParent(root: SecureProjectRoot, path: string): void {
+	const parent = dirname(path);
+	const fromRoot = relative(root.path, parent);
+	let current = root.path;
+	for (const component of fromRoot === "" ? [] : fromRoot.split(sep)) {
+		current = join(current, component);
+		const existing = verifyPatchPath(root, current);
+		if (!existing) mkdirSync(current, { mode: 0o755 });
+		const stats = verifyPatchPath(root, current);
+		if (!stats?.isDirectory()) throw new Error(`Patch parent is not a directory: ${current}`);
+	}
+}
+
+function patchPath(root: SecureProjectRoot, relativePath: string): string {
+	const path = resolve(root.path, relativePath);
+	verifyPatchPath(root, path);
+	return path;
+}
+
 function preparePatchedFiles(
 	projectRoot: string,
 	proposal: PatchProposal,
@@ -382,6 +474,7 @@ function preparePatchedFiles(
 	readonly after: string;
 	readonly existedBefore: boolean;
 }[] {
+	const secureRoot = secureProjectRoot(projectRoot);
 	const pending = new Map<
 		string,
 		{
@@ -395,8 +488,8 @@ function preparePatchedFiles(
 		const document = documents.get(edit.documentId);
 		if (!document) throw new Error(`Patch references undisclosed document ${edit.documentId}`);
 		const previous = pending.get(edit.documentId);
-		const path = join(projectRoot, document.relativePath);
-		const existedBefore = previous?.existedBefore ?? existsSync(path);
+		const path = patchPath(secureRoot, document.relativePath);
+		const existedBefore = previous?.existedBefore ?? verifyPatchPath(secureRoot, path) !== undefined;
 		const current =
 			previous?.after ??
 			(existedBefore
@@ -462,6 +555,27 @@ async function executeTaskReadCapability(
 	};
 }
 
+function writePatchFile(root: SecureProjectRoot, path: string, content: string, mode: number): void {
+	ensurePatchParent(root, path);
+	const temporary = `${path}.3xhaust-${process.pid}-${randomUUID()}.tmp`;
+	verifyPatchPath(root, path);
+	try {
+		writeFileSync(temporary, content, { encoding: "utf8", mode, flag: "wx" });
+		verifyPatchPath(root, path);
+		const temporaryStats = verifyPatchPath(root, temporary);
+		if (!temporaryStats?.isFile()) throw new Error(`Patch temporary file is unavailable: ${temporary}`);
+		renameSync(temporary, path);
+	} catch (error) {
+		try {
+			verifyPatchPath(root, temporary);
+			rmSync(temporary, { force: true });
+		} catch {
+			// Leave an unverifiable temporary path untouched rather than risk deleting outside the project.
+		}
+		throw error;
+	}
+}
+
 function applyPreparedFiles(
 	projectRoot: string,
 	files: readonly {
@@ -471,30 +585,36 @@ function applyPreparedFiles(
 		readonly existedBefore: boolean;
 	}[],
 ): void {
-	const applied: (typeof files)[number][] = [];
+	const root = secureProjectRoot(projectRoot);
+	const applied: { readonly file: (typeof files)[number]; readonly mode: number }[] = [];
 	try {
 		for (const file of files) {
-			const path = join(projectRoot, file.document.relativePath);
-			const temporary = `${path}.3xhaust-${process.pid}.tmp`;
-			mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
-			writeFileSync(temporary, file.after, {
-				encoding: "utf8",
-				mode: file.existedBefore ? statSync(path).mode : 0o644,
-			});
-			renameSync(temporary, path);
-			applied.push(file);
+			const path = patchPath(root, file.document.relativePath);
+			const targetStats = verifyPatchPath(root, path);
+			if (file.existedBefore && !targetStats?.isFile()) {
+				throw new Error(`Patch target is not a regular file: ${path}`);
+			}
+			const mode = targetStats?.mode ?? 0o644;
+			writePatchFile(root, path, file.after, mode);
+			applied.push({ file, mode });
 		}
 	} catch (error) {
-		for (const file of applied.reverse()) {
-			const path = join(projectRoot, file.document.relativePath);
-			if (file.existedBefore) writeFileSync(path, file.before, "utf8");
-			else rmSync(path, { force: true });
+		for (const { file, mode } of applied.reverse()) {
+			const path = patchPath(root, file.document.relativePath);
+			if (file.existedBefore) writePatchFile(root, path, file.before, mode);
+			else {
+				verifyPatchPath(root, path);
+				rmSync(path, { force: true });
+			}
 		}
 		throw error;
 	}
 }
 
-function runDiagnostics(projectRoot: string): {
+function runDiagnostics(
+	projectRoot: string,
+	strict: boolean,
+): {
 	readonly success: boolean;
 	readonly command: string;
 	readonly output: string;
@@ -502,7 +622,7 @@ function runDiagnostics(projectRoot: string): {
 	let command = "git diff --check";
 	let executable = "git";
 	let args = ["diff", "--check"];
-	if (existsSync(join(projectRoot, "package.json"))) {
+	if (!strict && existsSync(join(projectRoot, "package.json"))) {
 		const packageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8")) as {
 			readonly scripts?: Readonly<Record<string, string>>;
 		};
@@ -976,7 +1096,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 		}
 		emit({ type: "capability.started", capability: "getDiagnostics" });
 		const diagnosticsStarted = performance.now();
-		const diagnostics = runDiagnostics(projectRoot);
+		const diagnostics = runDiagnostics(projectRoot, input.strict === true);
 		const diagnosticsDurationMs = performance.now() - diagnosticsStarted;
 		emit({
 			type: "capability.completed",
@@ -1044,6 +1164,7 @@ export async function resumeCodingTask(input: ResumeCodingTaskInput): Promise<Co
 		...(input.onEvent ? { onEvent: input.onEvent } : {}),
 		...(input.requestApproval ? { requestApproval: input.requestApproval } : {}),
 		...(input.credential ? { credential: input.credential } : {}),
+		...(input.strict ? { strict: true } : {}),
 		...(input.preserveProviderSession ? { preserveProviderSession: true } : {}),
 		...(input.resources ? { resources: input.resources } : {}),
 		resumeCheckpoint: checkpoint,

@@ -83,6 +83,8 @@ export interface CodingTaskInput {
 	readonly model?: string;
 	readonly credential?: string;
 	readonly sessionId?: string;
+	/** Use only non-executing diagnostics and never run validation scripts from the project. */
+	readonly strict?: boolean;
 	readonly preserveProviderSession?: boolean;
 	readonly signal?: AbortSignal;
 	readonly onEvent?: (event: CodingTaskEvent) => void;
@@ -101,6 +103,8 @@ export interface ResumeCodingTaskInput {
 	readonly sessionId?: string;
 	readonly projectRoot?: string;
 	readonly credential?: string;
+	/** Use only non-executing diagnostics and never run validation scripts from the project. */
+	readonly strict?: boolean;
 	readonly preserveProviderSession?: boolean;
 	readonly signal?: AbortSignal;
 	readonly onEvent?: (event: CodingTaskEvent) => void;

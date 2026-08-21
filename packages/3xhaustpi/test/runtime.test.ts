@@ -1,19 +1,98 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	configuredPythonConcurrency,
 	providerCacheSessionId,
+	resumeCodingTask,
+	runCodingTask,
 	semanticOperationTurnIds,
 } from "../src/coding-runtime.ts";
 import { FileCredentialStore, SystemCredentialStore } from "../src/credential-store.ts";
 import { createStableProjectEvidence } from "../src/project-evidence.ts";
 import { createProjectSnapshot } from "../src/project-snapshot.ts";
 import { createProviderRuntime, providerCredentialOverride } from "../src/provider-runtime.ts";
-import { ThreeXhaustState } from "../src/state.ts";
+import { type ResumeCheckpoint, ThreeXhaustState } from "../src/state.ts";
 
 const temporaryDirectories: string[] = [];
+let checkpointSequence = 0;
+
+function approvedPatchCheckpoint(input: {
+	readonly project: string;
+	readonly statePath: string;
+	readonly relativePath: string;
+	readonly before: string;
+	readonly after: string;
+}): ResumeCheckpoint {
+	const objective = `update ${input.relativePath}`;
+	const snapshot = createProjectSnapshot(input.project, objective);
+	const disclosed = snapshot.documents.find(({ relativePath }) => relativePath === input.relativePath) ?? {
+		id: "doc_security_target" as const,
+		relativePath: input.relativePath,
+		content: input.before,
+		sha256: "fixture",
+	};
+	checkpointSequence += 1;
+	const sessionId = `session_security_${checkpointSequence}`;
+	const requestId = `request_security_${checkpointSequence}`;
+	const fingerprint = `fingerprint_security_${checkpointSequence}`;
+	const payload = JSON.stringify({
+		version: 1,
+		phase: "patch-approved",
+		projectRoot: input.project,
+		objective,
+		approve: true,
+		provider: "openai-codex",
+		model: "gpt-5.6-terra",
+		sessionId,
+		requestId,
+		fingerprint,
+		snapshotSha256: snapshot.sha256,
+		snapshotRevision: snapshot.revision,
+		documents: [disclosed],
+		generation: 1,
+		result: {
+			output: {
+				protocolVersion: 2,
+				kind: "patchProposal",
+				payload: {
+					edits: [{ documentId: disclosed.id, oldText: input.before, newText: input.after }],
+					assumptions: [],
+					verificationGoals: [],
+				},
+			},
+			usage: { input: 0, output: 0, cacheRead: 0 },
+		},
+	});
+	const state = new ThreeXhaustState(input.statePath);
+	state.beginRun({
+		projectId: `project_security_${checkpointSequence}`,
+		projectPath: input.project,
+		sessionId,
+		requestId,
+		fingerprint,
+		payload: JSON.stringify({ objective }),
+		checkpoint: payload,
+		generation: 1,
+	});
+	state.markProviderDispatching(requestId, 1);
+	state.settleProviderAndCheckpoint(requestId, sessionId, 1, "response_fixture", payload);
+	state.completeRun(sessionId, requestId, "failed");
+	state.close();
+	return {
+		sessionId,
+		projectPath: input.project,
+		payload,
+		requestId,
+		requestPayload: JSON.stringify({ objective }),
+		fingerprint,
+		generation: 1,
+		outboxState: "settled",
+		updatedAt: "2026-01-01T00:00:00.000Z",
+	};
+}
 
 function temporaryDirectory(): string {
 	const path = mkdtempSync(join(tmpdir(), "3xhaustpi-runtime-test-"));
@@ -47,6 +126,137 @@ describe("standalone runtime foundations", () => {
 				X3HAUSTPI_PYTHON_CONCURRENCY: "2",
 			}),
 		).toThrow(/1, 4, or 8/u);
+	});
+
+	it("uses only non-executing diagnostics when strict mode disables project validation scripts", async () => {
+		const project = temporaryDirectory();
+		const stateDirectory = temporaryDirectory();
+		const marker = join(project, "validation-script-ran");
+		writeFileSync(
+			join(project, "package.json"),
+			JSON.stringify({
+				scripts: {
+					test: "node -e \"require('node:fs').writeFileSync('validation-script-ran','yes')\"",
+				},
+			}),
+		);
+		writeFileSync(join(project, "target.txt"), "before\n");
+		expect(spawnSync("git", ["init", "--quiet"], { cwd: project }).status).toBe(0);
+		const checkpoint = approvedPatchCheckpoint({
+			project,
+			statePath: join(stateDirectory, "state.sqlite"),
+			relativePath: "target.txt",
+			before: "before\n",
+			after: "after\n",
+		});
+
+		const result = await runCodingTask({
+			projectRoot: project,
+			objective: "",
+			approve: true,
+			strict: true,
+			statePath: join(stateDirectory, "state.sqlite"),
+			resumeCheckpoint: checkpoint,
+		});
+
+		expect(result.diagnostics).toMatchObject({ success: true, command: "git diff --check" });
+		expect(readFileSync(join(project, "target.txt"), "utf8")).toBe("after\n");
+		expect(() => statSync(marker)).toThrow();
+	});
+
+	it("preserves project validation scripts as the default diagnostics behavior", async () => {
+		const project = temporaryDirectory();
+		const stateDirectory = temporaryDirectory();
+		const marker = join(project, "default-validation-script-ran");
+		writeFileSync(
+			join(project, "package.json"),
+			JSON.stringify({
+				scripts: {
+					test: "node -e \"require('node:fs').writeFileSync('default-validation-script-ran','yes')\"",
+				},
+			}),
+		);
+		writeFileSync(join(project, "target.txt"), "before\n");
+		const statePath = join(stateDirectory, "state.sqlite");
+		const checkpoint = approvedPatchCheckpoint({
+			project,
+			statePath,
+			relativePath: "target.txt",
+			before: "before\n",
+			after: "after\n",
+		});
+
+		const result = await runCodingTask({
+			projectRoot: project,
+			objective: "",
+			approve: true,
+			statePath,
+			resumeCheckpoint: checkpoint,
+		});
+
+		expect(result.diagnostics?.command).toBe("npm test");
+		expect(readFileSync(marker, "utf8")).toBe("yes");
+	});
+
+	it("propagates strict diagnostics policy through resumeCodingTask", async () => {
+		const project = temporaryDirectory();
+		const stateDirectory = temporaryDirectory();
+		writeFileSync(
+			join(project, "package.json"),
+			JSON.stringify({
+				scripts: {
+					test: "node -e \"require('node:fs').writeFileSync('resume-validation-script-ran','yes')\"",
+				},
+			}),
+		);
+		writeFileSync(join(project, "target.txt"), "before\n");
+		expect(spawnSync("git", ["init", "--quiet"], { cwd: project }).status).toBe(0);
+		const statePath = join(stateDirectory, "state.sqlite");
+		const checkpoint = approvedPatchCheckpoint({
+			project,
+			statePath,
+			relativePath: "target.txt",
+			before: "before\n",
+			after: "after\n",
+		});
+
+		const result = await resumeCodingTask({
+			approve: true,
+			strict: true,
+			statePath,
+			sessionId: checkpoint.sessionId,
+		});
+
+		expect(result?.diagnostics?.command).toBe("git diff --check");
+		expect(() => statSync(join(project, "resume-validation-script-ran"))).toThrow();
+	});
+
+	it("rejects patch targets with symlinked path components without writing outside the project", async () => {
+		const project = temporaryDirectory();
+		const outside = temporaryDirectory();
+		const stateDirectory = temporaryDirectory();
+		writeFileSync(join(outside, "target.txt"), "before\n");
+		symlinkSync(outside, join(project, "linked"), process.platform === "win32" ? "junction" : "dir");
+		const statePath = join(stateDirectory, "state.sqlite");
+		const checkpoint = approvedPatchCheckpoint({
+			project,
+			statePath,
+			relativePath: "linked/target.txt",
+			before: "before\n",
+			after: "escaped\n",
+		});
+
+		await expect(
+			runCodingTask({
+				projectRoot: project,
+				objective: "",
+				approve: true,
+				strict: true,
+				statePath,
+				resumeCheckpoint: checkpoint,
+			}),
+		).rejects.toThrow(/symbolic link/iu);
+		expect(readFileSync(join(outside, "target.txt"), "utf8")).toBe("before\n");
 	});
 
 	it("resolves a host-provided API credential through the in-memory overlay", async () => {
