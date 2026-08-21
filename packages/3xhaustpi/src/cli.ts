@@ -15,7 +15,7 @@ import { DesktopAccessibilityHost, desktopComputerUseStatus } from "./desktop-ru
 import { resolveProjectDataDirectory, resolveUserDataDirectory } from "./identity.ts";
 import { callMcpTool, listMcpTools } from "./mcp-client.ts";
 import { runNpmLogin, runNpmPublish } from "./npm-workflow.ts";
-import { PRODUCT_DISPLAY_NAME } from "./product-identity.ts";
+import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from "./product-identity.ts";
 import { credentialStoreDescription, loginProvider, providerStatuses } from "./provider-runtime.ts";
 import { runRealBenchmark } from "./real-benchmark.ts";
 import { addMcpServer, loadMcpResources, renderResourceHub } from "./resource-hub.ts";
@@ -24,7 +24,6 @@ import { runSelfUpdate } from "./self-update.ts";
 import { ThreeXhaustState } from "./state.ts";
 import { runTui } from "./tui.ts";
 
-const VERSION = "0.1.0";
 const RED = "\u001b[38;5;203m";
 const RESET = "\u001b[0m";
 
@@ -68,7 +67,7 @@ function printCodingTaskEvent(event: CodingTaskEvent): void {
 }
 
 function printHelp(): void {
-	console.log(`${PRODUCT_DISPLAY_NAME} ${VERSION}
+	console.log(`${PRODUCT_DISPLAY_NAME} ${PRODUCT_VERSION}
 
 Usage:
   3xhaustpi
@@ -345,7 +344,7 @@ async function doctor(project: string): Promise<void> {
 		}
 	})();
 	const rows = [
-		["package/bin", "implemented", `3xhaustpi ${VERSION}`],
+		["package/bin", "implemented", `3xhaustpi ${PRODUCT_VERSION}`],
 		["project", "verified", project],
 		["Node.js", "verified", process.version],
 		[
@@ -457,7 +456,7 @@ async function run(command: Extract<ThreeXhaustCommand, { readonly kind: "run" }
 
 async function execute(command: ThreeXhaustCommand): Promise<void> {
 	if (command.kind === "help") return printHelp();
-	if (command.kind === "version") return console.log(VERSION);
+	if (command.kind === "version") return console.log(PRODUCT_VERSION);
 	const project = canonicalProject(command.kind === "run" ? command.project : undefined);
 	if (command.kind === "models") return printModels();
 	if (command.kind === "extension-list") return printExtensions(project);
@@ -517,7 +516,7 @@ async function execute(command: ThreeXhaustCommand): Promise<void> {
 		return runBenchmark(command.repetitions);
 	}
 	if (command.kind === "doctor") return doctor(project);
-	if (command.kind === "update") return runSelfUpdate(VERSION);
+	if (command.kind === "update") return runSelfUpdate(PRODUCT_VERSION);
 	if (command.kind === "auth-login") {
 		return loginProvider(command.provider);
 	}

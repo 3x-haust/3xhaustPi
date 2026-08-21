@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { PRODUCT_MACHINE_NAME, PRODUCT_VERSION } from "./product-identity.ts";
 import { loadMcpServerConfiguration } from "./resource-hub.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -83,7 +84,7 @@ class StdioMcpClient {
 		await this.request("initialize", {
 			protocolVersion: "2024-11-05",
 			capabilities: {},
-			clientInfo: { name: "3xhaustpi", version: "0.1.0" },
+			clientInfo: { name: PRODUCT_MACHINE_NAME, version: PRODUCT_VERSION },
 		});
 		this.notify("notifications/initialized", {});
 	}

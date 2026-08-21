@@ -1,5 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ASSISTANT_DISPLAY_NAME, PRODUCT_DISPLAY_NAME, PRODUCT_MACHINE_NAME } from "../src/product-identity.ts";
+import {
+	ASSISTANT_DISPLAY_NAME,
+	PRODUCT_DISPLAY_NAME,
+	PRODUCT_MACHINE_NAME,
+	PRODUCT_VERSION,
+} from "../src/product-identity.ts";
 import { formatTranscriptEntry, renderTuiFrame, stripAnsi, type TuiViewState } from "../src/tui.ts";
 
 const state: TuiViewState = {
@@ -24,6 +30,13 @@ describe("product identity surfaces", () => {
 		expect(PRODUCT_DISPLAY_NAME).toBe("3xhaustPi");
 		expect(ASSISTANT_DISPLAY_NAME).toBe("3xhaust");
 		expect(PRODUCT_MACHINE_NAME).toBe("3xhaustpi");
+	});
+
+	it("matches the shipped package version", () => {
+		const manifest: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+		const version =
+			typeof manifest === "object" && manifest !== null && "version" in manifest ? manifest.version : undefined;
+		expect(version).toBe(PRODUCT_VERSION);
 	});
 
 	it("renders polished product chrome and unlabeled assistant prose without exposing the machine name", () => {
