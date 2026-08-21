@@ -65,6 +65,12 @@
 	},
 	"version": "0.0.3",
 	"overrides": {
+		"@earendil-works/gondolin": {
+			"undici": "6.28.0"
+		},
+		"minimatch": {
+			"brace-expansion": "5.0.9"
+		},
 		"protobufjs": "7.6.5",
 		"rimraf": "6.1.2",
 		"gaxios": {
