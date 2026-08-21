@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "schemaVersion": 2,
   "repository": {
-    "name": "3x-haust/3xhaustPi",
+    "name": "3x-haust/3xhaustpi",
     "lineage": "standalone-source-port",
     "importedFrom": "earendil-works/pi",
     "upstreamCommit": "e9e86e1c832de1edfff2d42041c8f9087d72a0cf",
@@ -35,25 +35,25 @@
     {
       "name": "@3xhaust/semantic-contract",
       "workspace": "packages/semantic-contract",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredExports": ["."]
     },
     {
       "name": "@3xhaust/core",
       "workspace": "packages/core",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredExports": ["."]
     },
     {
       "name": "@3xhaust/pi-adapter",
       "workspace": "packages/pi-adapter",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredExports": ["."]
     },
     {
       "name": "@3xhaust/pi-session",
       "workspace": "packages/pi-session",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "requiredExports": ["."]
     }
   ],

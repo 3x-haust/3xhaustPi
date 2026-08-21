@@ -15,7 +15,7 @@ const EXPECTED_EMBEDDING_POLICY = Object.freeze({
 
 export function assertCompatibilityManifest(compatibility) {
   assert.equal(compatibility.schemaVersion, 2)
-  assert.equal(compatibility.repository.name, '3x-haust/3xhaustPi')
+  assert.equal(compatibility.repository.name, '3x-haust/3xhaustpi')
   assert.equal(compatibility.repository.lineage, 'standalone-source-port')
   assert.equal(compatibility.repository.importedFrom, 'earendil-works/pi')
   assert.match(compatibility.repository.upstreamCommit, /^[a-f0-9]{40}$/)

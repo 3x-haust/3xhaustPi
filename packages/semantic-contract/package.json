@@ -1,6 +1,6 @@
 {
   "name": "@3xhaust/semantic-contract",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Strict inert semantic output contract for 3xhaustPi protocol v2",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,7 +35,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/3x-haust/3xhaustPi.git",
+    "url": "git+https://github.com/3x-haust/3xhaustpi.git",
     "directory": "packages/semantic-contract"
   }
 }

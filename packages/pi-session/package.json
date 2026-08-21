@@ -1,6 +1,6 @@
 {
   "name": "@3xhaust/pi-session",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fail-closed Pi session bridge for the 3xhaustPi desktop runtime",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
-    "@3xhaust/semantic-contract": "0.1.0",
+    "@3xhaust/semantic-contract": "0.1.1",
     "@earendil-works/pi-agent-core": "0.82.1",
     "@earendil-works/pi-ai": "0.82.1"
   },
@@ -42,7 +42,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/3x-haust/3xhaustPi.git",
+    "url": "git+https://github.com/3x-haust/3xhaustpi.git",
     "directory": "packages/pi-session"
   }
 }

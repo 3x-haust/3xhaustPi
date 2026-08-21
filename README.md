@@ -4,7 +4,7 @@
 만들지 못하게 분리한 로컬 coding runtime입니다. CLI/TUI와 Desktop app
 앱은 같은 `3xhaustpi/runtime` 패키지를 사용합니다.
 
-> 배포 상태: `3xhaustpi@0.1.0`은 npm public registry에 게시됐습니다.
+> 배포 상태: `3xhaustpi@0.1.1`은 npm public registry에 게시됐습니다.
 > 2026-08-21 깨끗한 임시 global prefix에서 설치한 뒤 `--help`, `--version`,
 > 잘못된 옵션 거부와 72x24 TUI의 `• Ready`, `/help`, `/exit`를 검증했습니다.
 

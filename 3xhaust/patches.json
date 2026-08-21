@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "owner": "3x-haust/3xhaustPi",
+  "owner": "3x-haust/3xhaustpi",
   "upstream": "earendil-works/pi",
   "upstreamBase": "e9e86e1c832de1edfff2d42041c8f9087d72a0cf",
   "candidateRefPattern": "refs/heads/candidates/3xhaustpi/*",
