@@ -63,8 +63,7 @@ function expectFrameWithin(output: string, columns: number, rows: number): void 
 }
 
 function expectNoDuplicateIdentity(output: string): void {
-	const identity = visibleLines(output)[0] ?? "";
-	expect(identity.match(/3xhaustPi/gu) ?? []).toHaveLength(1);
+	expect(output.match(/3xhaustPi/gu) ?? []).toHaveLength(1);
 }
 
 describe("Pi-native event-driven TUI renderer", () => {
@@ -82,7 +81,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 			expect(layout.rows).toBe(rows);
 			expect(layout.mode).toBe(mode);
 			expect(layout.contextRows).toBe(0);
-			expect(layout.composerRows).toBe(2);
+			expect(layout.composerRows).toBe(3);
 			expect(layout.footerRows).toBe(0);
 			expect(layout.transcriptRows).toBeGreaterThanOrEqual(1);
 			expect(layout.totalRows).toBeLessThanOrEqual(rows);
@@ -133,32 +132,36 @@ describe("Pi-native event-driven TUI renderer", () => {
 	it("keeps one information authority per rail", () => {
 		const output = renderTuiFrame({ ...state, activeTasks: 0 }, 120, 32);
 		const lines = visibleLines(output);
-		expect(lines[0]).toBe("3xhaustPi: project (gpt-5.6-terra)");
-		expect(lines[0]).not.toMatch(/ready|openai|context|tasks/u);
+		expect(lines.at(-2)).toContain("/tmp/project");
+		expect(lines.at(-2)).toContain("gpt-5.6-terra:medium");
+		expect(lines.at(-2)).not.toMatch(/ready|tasks/u);
+		expect(lines.at(-1)).toBe("(😺 3xhaustPi Native) project");
 		expect(lines).toContainEqual(expect.stringContaining("• Queued (1 waiting)"));
-		expect(lines.join("\n")).not.toContain("…/project");
-		expect(lines.at(-2)).toMatch(/^─+$/u);
-		expect(lines.at(-1)).toContain("> ");
+		expect(lines.at(-3)).toMatch(/^─+$/u);
+		expect(lines.at(-4)).toContain("> ");
+		expect(lines.at(-1)).not.toContain("> ");
 	});
 
-	it("keeps the model in the wide title instead of a permanent footer", () => {
+	it("keeps the model in the wide title and the status footer rail", () => {
 		expect(footerSegmentOrder()).toEqual(["model", "context", "provider", "tasks"]);
 		const minimal = visibleLines(renderTuiFrame(state, 40, 12));
-		expect(minimal[0]).toBe("3xhaustPi");
-		expect(minimal.at(-1)).toContain("> ");
+		expect(minimal.at(-2)).toBe("gpt-5.6-terra:medium");
+		expect(minimal.at(-4)).toContain("> ");
 		const wide = visibleLines(renderTuiFrame(state, 120, 12));
-		expect(wide[0]).toContain("(gpt-5.6-terra)");
-		expect(wide.at(-1)).toContain("> ");
-		expect(wide.join("\n")).not.toContain("openai-codex auto");
+		expect(wide.at(-2)).toContain("gpt-5.6-terra:medium");
+		expect(wide.at(-2)).toContain("(openai-codex)");
+		expect(wide.at(-4)).toContain("> ");
+		expect(wide.at(-1)).toContain("3xhaustPi");
 	});
 
 	it("removes command hints and provider metadata below sixty columns", () => {
 		const output = visibleLines(renderTuiFrame(state, 56, 22));
 
 		expect(output.join("\n")).not.toContain("/help  /model  /exit");
-		expect(output[0]).toBe("3xhaustPi: project");
-		expect(output.at(-1)).toContain("> ");
-		expect(output.join("\n")).not.toContain("openai-codex");
+		expect(output.at(-2)).toContain("/tmp/project");
+		expect(output.at(-2)).toContain("gpt-5.6-terra");
+		expect(output.at(-4)).toContain("> ");
+		expect(output.at(-1)).toContain("3xhaustPi");
 	});
 
 	it("never admits a lower-priority footer segment after a higher one cannot fit", () => {
@@ -172,7 +175,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 		const layout = layoutTuiFrame(40, 12, { autocompleteRows: 8 });
 		expect(layout.mode).toBe("minimal");
 		expect(layout.contextRows).toBe(0);
-		expect(layout.identityRows + layout.activityRows + layout.composerRows + layout.footerRows).toBe(4);
+		expect(layout.identityRows + layout.activityRows + layout.composerRows + layout.footerRows).toBe(6);
 		expect(layout.transcriptRows).toBeGreaterThanOrEqual(1);
 		expect(layout.autocompleteRows).toBeLessThanOrEqual(4);
 	});
@@ -246,6 +249,24 @@ describe("Pi-native event-driven TUI renderer", () => {
 				durationMs: 5_000,
 			}),
 		).toBe("Stats: TPS 15.8 tok/s · Cache hit 25.0% · 5.0s");
+		expect(
+			formatResponseMetrics({
+				// Providers that exclude cached tokens from `input`: nearly all prompt
+				// tokens were cache reads, so the hit ratio saturates at 100%.
+				input: 500,
+				output: 79,
+				cacheRead: 8_000,
+				durationMs: 5_000,
+			}),
+		).toBe("Stats: TPS 15.8 tok/s · Cache hit 100.0% · 5.0s");
+		expect(
+			formatResponseMetrics({
+				input: 1_000,
+				output: 79,
+				cacheRead: 6_417,
+				durationMs: 5_000,
+			}),
+		).toBe("Stats: TPS 15.8 tok/s · Cache hit 100.0% · 5.0s");
 		expect(formatResponseMetrics({ input: null, output: null, cacheRead: null, durationMs: 1_200 })).toBe(
 			"Stats: 1.2s",
 		);
@@ -340,18 +361,20 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(stripAnsi(formatTuiActivityLine({ status: "running", detail: malicious }))).toContain("safeafterdone");
 	});
 
-	it("uses one activity row and a top-rule-only shell composer", () => {
+	it("uses one activity row and a double-rule shell composer", () => {
 		const layout = layoutTuiFrame(72, 24);
 		const output = visibleLines(renderTuiFrame({ ...state, status: "running", activeTasks: 0 }, 72, 24));
 
 		expect(layout.contextRows).toBe(0);
 		expect(layout.activityRows).toBe(1);
-		expect(layout.composerRows).toBe(2);
+		expect(layout.composerRows).toBe(3);
 		expect(layout.footerRows).toBe(0);
-		expect(output.at(-3)).toMatch(/^• Working \(/u);
-		expect(output.at(-2)).toMatch(/^─+$/u);
-		expect(output.at(-1)).toContain("> ");
-		expect(output.at(-1)).not.toContain("Ask anything");
+		expect(output.at(-6)).toMatch(/^• Working \(/u);
+		expect(output.at(-5)).toMatch(/^─+$/u);
+		expect(output.at(-4)).toContain("> ");
+		expect(output.at(-4)).not.toContain("Ask anything");
+		expect(output.at(-3)).toMatch(/^─+$/u);
+		expect(output.at(-2)).toContain("gpt-5.6-terra");
 	});
 
 	it("separates prompt surface and assistant prose without speaker rails", () => {
@@ -646,14 +669,14 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(output).toContain("3xhaustPi");
 		expect(output).toContain("로그인 오류를 조사해");
 		expect(output).not.toContain("진단 결과도 확인해");
-		expect(visibleLines(output)[0]).toBe("3xhaustPi: project (gpt-5.6-terra)");
+		expect(visibleLines(output).at(-2)).toContain("gpt-5.6-terra:medium");
 		expect(output).toContain("\u001b[48;5;238m");
 		expect(visibleLines(output)).toContain("• Working (esc to interrupt)");
-		expect(visibleLines(output).at(-1)).toContain("> 로그인 오류를 조사해");
-		expect(output).not.toContain("openai-codex");
-		expect(output).not.toContain("35K/400K");
+		expect(visibleLines(output).at(-4)).toContain("> 로그인 오류를 조사해");
+		expect(visibleLines(output).at(-2)).toContain("openai-codex");
+		expect(visibleLines(output).at(-2)).toContain("35K/400K");
 		expect(visibleLines(output).join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
-		expect(output).not.toMatch(/3xhaustPi Native|😺|🤖/u);
+		expect(output).not.toMatch(/🤖/u);
 	});
 
 	it("keeps prompt tint and unlabeled answer hierarchy in a narrow terminal", () => {
@@ -661,7 +684,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(output).toContain("인증 콜백에서");
 		expect(output).toContain("\u001b[48;5;238m");
 		expect(visibleLines(output).join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
-		expect(visibleLines(output).at(-1)).toContain("> 로그인 오류를 조사해");
+		expect(visibleLines(output).at(-4)).toContain("> 로그인 오류를 조사해");
 		expect(output).not.toMatch(/not implemented|excluded|skipped|구현하지|제외/u);
 	});
 	it("bounds the transcript viewport and keeps newest chat content above fixed chrome", () => {
@@ -677,7 +700,8 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(output).toContain("  80 한국어 응답");
 		expect(output).not.toContain("  1 한국어 응답");
 		expect(visibleLines(output).join("\n")).toContain("• Working");
-		expect(visibleLines(output).at(-1)).toContain(">");
+		expect(visibleLines(output).at(-4)).toContain(">");
+		expect(visibleLines(output).at(-2)).toContain("gpt-5.6-terra");
 	});
 
 	it("keeps responsive CJK-safe chrome within 56, 72, and 120 columns", () => {

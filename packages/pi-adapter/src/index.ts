@@ -1,4 +1,11 @@
 export { createModelsPiComplete, createThreeXhaustPiAdapter, semanticProviderSessionId } from "./adapter.ts";
+export {
+	type CompactionSettings,
+	compactContext,
+	DEFAULT_COMPACTION_SETTINGS,
+	estimateTokens,
+	shouldCompact,
+} from "./compaction.ts";
 export { PiAdapterError, type PiAdapterErrorCode } from "./errors.ts";
 export { X3HAUST_SEMANTIC_STABLE_PREFIX } from "./prompt.ts";
 export type {

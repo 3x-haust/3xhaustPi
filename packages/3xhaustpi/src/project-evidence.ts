@@ -20,8 +20,8 @@ export interface StableProjectEvidence {
 }
 
 export function createStableProjectEvidence(projectRoot: string, maximumCharacters = 16_284): StableProjectEvidence {
-	if (!Number.isSafeInteger(maximumCharacters) || maximumCharacters < 1 || maximumCharacters > 18_000) {
-		throw new Error("Stable project evidence character bound must be an integer from 1 to 18,000");
+	if (!Number.isSafeInteger(maximumCharacters) || maximumCharacters < 1 || maximumCharacters > 1_048_576) {
+		throw new Error("Stable project evidence character bound must be an integer from 1 to 1,048,576");
 	}
 	const blocks: string[] = [];
 	const files: { path: string; sha256: string }[] = [];

@@ -18,7 +18,6 @@ import type {
 	WorkIntent,
 } from "./types.ts";
 
-const MAX_TEXT = 4_096;
 const MAX_SOURCE_TEXT = 1_048_576;
 const MAX_LIST = 64;
 const ID_SUFFIX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,126}$/;
@@ -48,7 +47,8 @@ function exact(value: Record<string, unknown>, required: readonly string[], opti
 function text(value: unknown, options: { readonly max?: number; readonly nonEmpty?: boolean } = {}): string {
 	if (typeof value !== "string") fail("INVALID_TEXT", "Declared text must be a string");
 	if (options.nonEmpty && value.length === 0) fail("INVALID_LENGTH", "Declared text must not be empty");
-	if (value.length > (options.max ?? MAX_TEXT)) fail("INVALID_LENGTH", "Declared text exceeds maximum length");
+	if (options.max !== undefined && value.length > options.max)
+		fail("INVALID_LENGTH", "Declared text exceeds maximum length");
 	return value;
 }
 

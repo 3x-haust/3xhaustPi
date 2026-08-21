@@ -21,10 +21,12 @@ import {
 	parseSemanticTurnRequest,
 	type SemanticOutput,
 } from "@3xhaust/semantic-contract";
-import { cleanupSessionResources } from "@earendil-works/pi-ai";
+import { cleanupSessionResources, type Models } from "@earendil-works/pi-ai";
 import { compileSemanticOutput, normalizeObservation } from "../../core/src/index.ts";
 import {
+	compactContext,
 	createThreeXhaustPiAdapter,
+	type PiComplete,
 	type SemanticTurnResult,
 	semanticProviderSessionId,
 	X3HAUST_SEMANTIC_STABLE_PREFIX,
@@ -105,11 +107,11 @@ export type CodingTaskEvent =
 	  }
 	| {
 			readonly type: "capability.started";
-			readonly capability: "searchText" | "searchSymbol" | "readRanges" | "applyPatch" | "getDiagnostics";
+			readonly capability: string;
 	  }
 	| {
 			readonly type: "capability.completed";
-			readonly capability: "searchText" | "searchSymbol" | "readRanges" | "applyPatch" | "getDiagnostics";
+			readonly capability: string;
 			readonly success: boolean;
 			readonly durationMs: number;
 			readonly summary: string;
@@ -126,6 +128,10 @@ export type CodingTaskEvent =
 			readonly command: string;
 			readonly output: string;
 			readonly durationMs: number;
+	  }
+	| {
+			readonly type: "assistant.delta";
+			readonly text: string;
 	  }
 	| {
 			readonly type: "assistant.message";
@@ -154,6 +160,25 @@ export interface CodingTaskResult {
 		readonly success: boolean;
 		readonly command: string;
 		readonly output: string;
+	};
+}
+
+/**
+ * Streams provider tokens through `assistant.delta` events while preserving the
+ * non-streaming completion contract: the returned promise resolves to the final
+ * assistant message, or rejects when the stream reports an error.
+ */
+export function createStreamingComplete(models: Models, emit: (event: CodingTaskEvent) => void): PiComplete {
+	return async (requestModel, context, options) => {
+		const stream = models.streamSimple(requestModel, context, options);
+		let failure: unknown;
+		for await (const event of stream) {
+			if (event.type === "text_delta") emit({ type: "assistant.delta", text: event.delta });
+			else if (event.type === "error") failure = event.error;
+		}
+		const message = await stream.result();
+		if (failure !== undefined) throw failure;
+		return message;
 	};
 }
 
@@ -555,6 +580,66 @@ async function executeTaskReadCapability(
 	};
 }
 
+export interface ReadPlanEventSink {
+	readonly onStarted: (
+		capability: "searchText" | "searchSymbol" | "readRanges" | "applyPatch" | "getDiagnostics",
+	) => void;
+	readonly onCompleted: (event: {
+		readonly type: "capability.completed";
+		readonly capability: "searchText" | "searchSymbol" | "readRanges" | "applyPatch" | "getDiagnostics";
+		readonly success: boolean;
+		readonly durationMs: number;
+		readonly summary: string;
+	}) => void;
+}
+
+/**
+ * Executes every planned read capability concurrently (bounded by the caller's
+ * slice) so total wall time tracks the slowest read, then normalizes one
+ * observation per invocation in input order.
+ */
+export async function executeReadPlanInvocations(
+	invocations: readonly Parameters<typeof executeTaskReadCapability>[0][],
+	context: {
+		readonly projectRoot: string;
+		documents: ReadonlyMap<string, ProjectDocument>;
+		pythonPool?: PythonReadPool;
+		readonly onStarted?: ReadPlanEventSink["onStarted"];
+		readonly onCompleted?: ReadPlanEventSink["onCompleted"];
+	},
+) {
+	const outcomes = await Promise.all(
+		invocations.map(async (invocation) => {
+			context.onStarted?.(invocation.capability);
+			const started = performance.now();
+			const outcome = await executeTaskReadCapability(
+				invocation,
+				context.projectRoot,
+				context.documents,
+				context.pythonPool,
+			);
+			context.onCompleted?.({
+				type: "capability.completed",
+				capability: invocation.capability,
+				success: outcome.status === "succeeded",
+				durationMs: performance.now() - started,
+				summary: outcome.summary,
+			});
+			return { invocation, outcome };
+		}),
+	);
+	return Promise.all(
+		outcomes.map(({ invocation, outcome }) =>
+			normalizeObservation(invocation, {
+				status: outcome.status,
+				summary: outcome.summary,
+				facts: { matchCount: outcome.matchCount, outputSha256: digest(outcome.outputHashInput) },
+				artifactRefs: [],
+			}),
+		),
+	);
+}
+
 function writePatchFile(root: SecureProjectRoot, path: string, content: string, mode: number): void {
 	ensurePatchParent(root, path);
 	const temporary = `${path}.3xhaust-${process.pid}-${randomUUID()}.tmp`;
@@ -729,7 +814,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 	let hookChain = Promise.resolve<unknown>(undefined);
 	const emit = (event: CodingTaskEvent): void => {
 		input.onEvent?.(event);
-		if (resources.hooks.length > 0) {
+		if (event.type !== "assistant.delta" && resources.hooks.length > 0) {
 			hookChain = hookChain.then(() => runObserverHooks(resources.hooks, event, { cwd: projectRoot }));
 		}
 	};
@@ -743,10 +828,13 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 	const model = resolveModel(models, provider, modelId);
 	const snapshot = createProjectSnapshot(projectRoot, objective);
 	const skillContextBudget = Math.max(0, 18_000 - snapshot.stableContext.length - 2);
-	const stableContext =
+	const combinedStableContext =
 		skillContextBudget > 0 && resources.skillContext
 			? `${snapshot.stableContext}\n\n${resources.skillContext.slice(0, skillContextBudget)}`
 			: snapshot.stableContext;
+	// Compact instead of crashing when evidence plus skills exceed the prompt
+	// budget; the deterministic cut keeps the provider cache prefix stable.
+	const stableContext = compactContext(combinedStableContext, 4_500);
 	const resumesApprovedPatch = recovered?.phase === "patch-approved" || recovered?.phase === "patch-applied";
 	if (recovered && !resumesApprovedPatch && recovered.snapshotSha256 !== snapshot.sha256) {
 		throw new Error("Project evidence changed after the checkpoint; resume blocked as stale");
@@ -801,9 +889,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 	emit({ type: "session.started", sessionId, provider, model: modelId, objective });
 
 	try {
-		const adapter = createThreeXhaustPiAdapter({
-			complete: (requestModel, context, options) => models.completeSimple(requestModel, context, options),
-		});
+		const adapter = createThreeXhaustPiAdapter({ complete: createStreamingComplete(models, emit) });
 		const semanticSession = adapter.open({
 			connectionId: `connection_${provider}`,
 			model,
@@ -868,12 +954,15 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 		});
 		let finalResult: PersistedSemanticResult = first;
 		let observationId = recovered?.observationId;
+		const observationIds: string[] = recovered?.observationId ? [recovered.observationId] : [];
 		let checkpointGeneration = recovered?.generation ?? generation;
-		if (decision.kind === "readPlan" && decision.invocations.length === 1) {
-			const invocation = decision.invocations[0]!;
+		if (decision.kind === "readPlan" && decision.invocations.length >= 1) {
+			// Bounded parallel tool execution: every planned read capability runs
+			// concurrently so total wait tracks the slowest read, not their sum.
+			const invocations = decision.invocations.slice(0, 4);
 			const exactTarget =
-				typeof invocation.input.query === "string"
-					? JSON.stringify(invocation.input.query)
+				invocations.length === 1 && typeof invocations[0]!.input.query === "string"
+					? JSON.stringify(invocations[0]!.input.query)
 					: "the disclosed bounded evidence";
 			if (recovered?.finalResult) {
 				finalResult = recovered.finalResult!;
@@ -882,24 +971,18 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 				const followupGeneration = recovered?.phase === "followup-ready" ? recovered.generation : generation + 1;
 				checkpointGeneration = followupGeneration;
 				if (!observationId) {
-					emit({ type: "capability.started", capability: invocation.capability });
-					const capabilityStarted = performance.now();
-					const outcome = await executeTaskReadCapability(invocation, projectRoot, documents, pythonPool);
-					emit({
-						type: "capability.completed",
-						capability: invocation.capability,
-						success: outcome.status === "succeeded",
-						durationMs: performance.now() - capabilityStarted,
-						summary: outcome.summary,
+					const observations = await executeReadPlanInvocations(invocations, {
+						projectRoot,
+						documents,
+						pythonPool,
+						onStarted: (capability) => emit({ type: "capability.started", capability }),
+						onCompleted: (event) => emit(event),
 					});
-					const observation = await normalizeObservation(invocation, {
-						status: outcome.status,
-						summary: outcome.summary,
-						facts: { matchCount: outcome.matchCount, outputSha256: digest(outcome.outputHashInput) },
-						artifactRefs: [],
-					});
-					observationId = observation.observationId;
-					state.recordObservation(sessionId, observationId, JSON.stringify(observation));
+					observationIds.push(...observations.map((observation) => observation.observationId));
+					observationId = observationIds[0];
+					for (const observation of observations) {
+						state.recordObservation(sessionId, observation.observationId, JSON.stringify(observation));
+					}
 					state.prepareProviderDispatch(
 						requestId,
 						sessionId,
@@ -910,7 +993,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 							phase: "followup-ready",
 							generation: followupGeneration,
 							result: first,
-							observationId,
+							observationIds,
 						}),
 					);
 				}
@@ -925,7 +1008,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 							disclosed: {
 								selectionIds: [],
 								documentIds: durableDocuments.map((document) => document.id),
-								observationIds: [observationId],
+								observationIds,
 							},
 						}),
 						signal,
@@ -958,7 +1041,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 						generation: followupGeneration,
 						result: first,
 						finalResult,
-						observationId,
+						observationIds,
 					}),
 				);
 			}
@@ -966,7 +1049,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 				projectId,
 				turnId: semanticTurnIds.followup,
 				projectRevision: snapshotRevision,
-				observationDigests: observationId ? [observationId] : [],
+				observationDigests: [...observationIds],
 			});
 		}
 		await semanticSession.close();

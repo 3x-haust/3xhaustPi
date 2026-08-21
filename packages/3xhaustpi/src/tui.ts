@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { basename } from "node:path";
 import {
 	CombinedAutocompleteProvider,
@@ -37,7 +38,7 @@ import {
 	text,
 	warning,
 } from "./tui-text.ts";
-import { fitTranscriptCards, formatSubmittedPromptTurn } from "./tui-transcript.ts";
+import { AssistantTranscriptFlow, fitTranscriptCards, formatSubmittedPromptTurn } from "./tui-transcript.ts";
 
 export { cellWidth, sanitizeTerminalText, stripAnsi } from "./tui-text.ts";
 export type { TuiTranscriptRole, TuiTranscriptTemplate } from "./tui-transcript.ts";
@@ -53,6 +54,7 @@ export interface TuiViewState {
 	readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	readonly contextTokens?: number;
 	readonly contextLimit?: number;
+	readonly cacheHitRatio?: number;
 	readonly gitStatus?: "clean" | "dirty" | "unavailable";
 	readonly activeTasks?: number;
 	readonly providerConfigured: boolean;
@@ -69,10 +71,10 @@ export interface TuiLayoutContract {
 	readonly columns: number;
 	readonly rows: number;
 	readonly mode: TuiDensityMode;
-	readonly identityRows: 1;
+	readonly identityRows: 2;
 	readonly contextRows: 0;
 	readonly activityRows: 1;
-	readonly composerRows: 2;
+	readonly composerRows: 3;
 	readonly footerRows: 0;
 	readonly autocompleteRows: number;
 	readonly chromeRows: number;
@@ -98,7 +100,7 @@ export function layoutTuiFrame(
 	const mode = densityMode(width);
 	const requestedAutocompleteRows = Math.max(0, Math.floor(options.autocompleteRows ?? 0));
 	const boundedAutocompleteRows = Math.min(requestedAutocompleteRows, Math.floor(height * 0.4));
-	const essentialChromeRows = 4;
+	const essentialChromeRows = 6;
 	const contextRows = 0;
 	const chromeRows = essentialChromeRows;
 	const autocompleteRows = Math.min(boundedAutocompleteRows, Math.max(0, height - chromeRows - 1));
@@ -107,10 +109,10 @@ export function layoutTuiFrame(
 		columns: width,
 		rows: height,
 		mode,
-		identityRows: 1,
+		identityRows: 2,
 		contextRows,
 		activityRows: 1,
-		composerRows: 2,
+		composerRows: 3,
 		footerRows: 0,
 		autocompleteRows,
 		chromeRows,
@@ -158,7 +160,8 @@ export function formatResponseMetrics(metrics: TuiResponseMetrics): string {
 		parts.push(`TPS ${(metrics.output / (metrics.durationMs / 1_000)).toFixed(1)} tok/s`);
 	}
 	if (metrics.input !== null && metrics.input > 0 && metrics.cacheRead !== null) {
-		parts.push(`Cache hit ${((Math.max(0, metrics.cacheRead) / metrics.input) * 100).toFixed(1)}%`);
+		const ratio = Math.min(1, Math.max(0, metrics.cacheRead / Math.max(metrics.input, metrics.cacheRead)));
+		parts.push(`Cache hit ${(ratio * 100).toFixed(1)}%`);
 	}
 	parts.push(seconds(metrics.durationMs));
 	return `Stats: ${parts.join(" · ")}`;
@@ -286,18 +289,57 @@ export function formatStatusFooter(state: TuiViewState, columns = 120): string {
  * Static renderer used by tests and evidence conversion. The live TUI below uses
  * Pi's differential renderer with the same bounded transcript budgeting.
  */
+function compactPath(value: string): string {
+	const home = homedir();
+	return value.startsWith(home) ? `~${value.slice(home.length)}` : sanitizeTerminalText(value);
+}
+
+/**
+ * Top status rail: working context on the left (path, cache health, context
+ * budget), provider and model identity right-aligned, per the product chrome.
+ */
+function contextHeaderRail(state: TuiViewState, layout: TuiLayoutContract): string {
+	const thinking = state.thinkingLevel ? `:${state.thinkingLevel}` : "";
+	if (layout.mode === "degraded" || layout.mode === "minimal") {
+		return frameLine(dim(`${sanitizeTerminalText(state.model)}${thinking}`), layout.columns);
+	}
+	const left: string[] = [muted(compactPath(state.projectRoot))];
+	const used = state.contextTokens;
+	const limit = state.contextLimit ?? 0;
+	if (state.cacheHitRatio !== undefined) {
+		const label = `CH${(Math.min(1, Math.max(0, state.cacheHitRatio)) * 100).toFixed(1)}%`;
+		left.push(state.cacheHitRatio >= 0.9 ? success(label) : warning(label));
+	}
+	if (used !== undefined && limit > 0) {
+		left.push(text(`${compactTokens(used)}/${compactTokens(limit)} (${((used / limit) * 100).toFixed(1)}%)`));
+	} else if (limit > 0) {
+		left.push(muted(`0/${compactTokens(limit)} (0.0%)`));
+	}
+	const thinkingSuffix = state.thinkingLevel ? `:${state.thinkingLevel}` : "";
+	const right = `${dim(`(${sanitizeTerminalText(state.provider)})`)} ${text(sanitizeTerminalText(state.model))}${dim(thinkingSuffix)}`;
+	// Adaptive fit: keep the mandatory anchors (path + provider/model), then admit
+	// optional segments only while the single-line budget holds.
+	let body = "";
+	for (const extra of [left.slice(1), []]) {
+		body = joinSegments([left[0], ...extra]);
+		if (cellWidth(stripAnsi(body)) + cellWidth(stripAnsi(right)) + 2 <= layout.columns) break;
+	}
+	const gap = Math.max(2, layout.columns - cellWidth(stripAnsi(body)) - cellWidth(stripAnsi(right)));
+	return frameLine(`${body}${" ".repeat(gap)}${right}`, layout.columns);
+}
+
+/** Brand rail under the status rail: product identity with workspace anchor. */
 function identityRail(state: TuiViewState, layout: TuiLayoutContract): string {
 	const project = sanitizeTerminalText(basename(state.projectRoot));
-	const parts = [PRODUCT_DISPLAY_NAME];
+	const parts = [`(${accent("😺")} ${text(`${PRODUCT_DISPLAY_NAME} Native`)})`];
 	if (project !== PRODUCT_MACHINE_NAME && layout.mode !== "degraded" && layout.mode !== "minimal")
-		parts.push(`: ${project}`);
-	if (layout.mode === "full" || layout.mode === "wide") parts.push(` (${sanitizeTerminalText(state.model)})`);
-	return frameLine(muted(parts.join("")), layout.columns);
+		parts.push(dim(project));
+	return frameLine(parts.join(" "), layout.columns);
 }
 
 function composerRail(state: TuiViewState, layout: TuiLayoutContract): readonly string[] {
 	const rule = accent("─".repeat(layout.columns));
-	return [rule, frameLine(`${accent(">")} ${state.input}`, layout.columns)];
+	return [rule, frameLine(`${accent(">")} ${state.input}`, layout.columns), rule];
 }
 
 export function transcriptViewportRows(
@@ -308,25 +350,44 @@ export function transcriptViewportRows(
 	return layoutTuiFrame(columns, rows, { autocompleteRows: reservedRows }).transcriptRows;
 }
 
+export const TUI_SCROLL_KEYS = {
+	pageUp: "\u001b[5~",
+	pageDown: "\u001b[6~",
+	altUp: "\u001b[1;3A",
+	altDown: "\u001b[1;3B",
+	altEnd: "\u001b[1;3F",
+} as const;
+
 export class TranscriptViewport implements Component {
 	private readonly entries: readonly string[];
 	private readonly rowsProvider: () => number;
 	private readonly reservedRowsProvider: () => number;
+	private readonly offsetProvider: () => number;
 
 	constructor(
 		entries: readonly string[],
 		rowsProvider: () => number = () => process.stdout.rows || 36,
 		reservedRowsProvider: () => number = () => 0,
+		offsetProvider: () => number = () => 0,
 	) {
 		this.entries = entries;
 		this.rowsProvider = rowsProvider;
 		this.reservedRowsProvider = reservedRowsProvider;
+		this.offsetProvider = offsetProvider;
 	}
 
 	render(width: number): string[] {
 		const columns = Math.max(1, width);
 		const budget = transcriptViewportRows(this.rowsProvider(), this.reservedRowsProvider(), columns);
-		const visibleLines = fitTranscriptCards(this.entries, columns, budget);
+		const offset = Math.max(0, Math.floor(this.offsetProvider()));
+		let visibleLines: string[];
+		if (offset === 0) {
+			visibleLines = fitTranscriptCards(this.entries, columns, budget);
+		} else {
+			const extended = fitTranscriptCards(this.entries, columns, budget + offset);
+			const end = Math.max(0, extended.length - offset);
+			visibleLines = extended.slice(Math.max(0, end - budget), end);
+		}
 		return [...Array.from({ length: Math.max(0, budget - visibleLines.length) }, () => ""), ...visibleLines].map(
 			(line) => frameLine(line, columns),
 		);
@@ -359,11 +420,12 @@ export function renderTuiFrame(
 		...visibleTranscript,
 	];
 	const lines = [
-		identityRail(state, layout),
 		...paddedTranscript,
 		...Array.from({ length: layout.autocompleteRows }, () => ""),
 		activity,
 		...composerRail(state, layout),
+		contextHeaderRail(state, layout),
+		identityRail(state, layout),
 	];
 	return lines
 		.slice(0, layout.rows)
@@ -391,6 +453,7 @@ export interface TuiActivityState {
 	readonly queuedCount?: number;
 	readonly resumable?: boolean;
 	readonly canceled?: boolean;
+	readonly detachedNew?: number;
 }
 
 function activityDetail(value: string, columns: number): string {
@@ -398,6 +461,13 @@ function activityDetail(value: string, columns: number): string {
 }
 
 export function formatTuiActivityLine(state: TuiActivityState, columns = 120): string {
+	const line = baseTuiActivityLine(state, columns);
+	const detachedNew = state.detachedNew ?? 0;
+	if (detachedNew > 0) return `${line} ${dim(`· ↓ ${detachedNew} new · Alt+End latest`)}`;
+	return line;
+}
+
+function baseTuiActivityLine(state: TuiActivityState, columns: number): string {
 	const queuedCount = state.queuedCount ?? 0;
 	const activeCount = state.activeCount ?? 0;
 	const detail = state.detail ? activityDetail(state.detail, Math.max(8, columns - 14)) : "";
@@ -494,7 +564,7 @@ export async function runTui(input: {
 		},
 	) => Promise<unknown | undefined>;
 }): Promise<void> {
-	const provider = input.provider ?? DEFAULT_PROVIDER;
+	let provider = input.provider ?? DEFAULT_PROVIDER;
 	let model = input.model ?? DEFAULT_MODEL;
 	const thinkingLevel = input.thinkingLevel;
 	const desktopHost = input.desktopHost ?? new DesktopAccessibilityHost();
@@ -518,7 +588,14 @@ export async function runTui(input: {
 		maxVisibleLines: 1,
 		submitSlashArgumentCompletions: true,
 	});
-	const transcript = new TranscriptViewport(transcriptEntries, () => process.stdout.rows || 36);
+	const scrollOffset = { value: 0 };
+	let detachedNewCount = 0;
+	const transcript = new TranscriptViewport(
+		transcriptEntries,
+		() => process.stdout.rows || 36,
+		() => 0,
+		() => scrollOffset.value,
+	);
 	let queuedRequests: readonly TuiRequest[] = database
 		.listTuiRequests(projectRoot)
 		.filter((request) => request.status === "queued");
@@ -533,7 +610,6 @@ export async function runTui(input: {
 	let desktopObservation: DesktopAccessibilityObservation | undefined;
 	let activeTuiRequestId: string | undefined;
 	let activeTuiRequestHandedOff = false;
-	let pendingResponseMetrics: string | undefined;
 	let active = true;
 	let ctrlCExitArmed = false;
 	let canceledActive = false;
@@ -542,32 +618,65 @@ export async function runTui(input: {
 		finish = resolve;
 	});
 
+	let latestContextTokens: number | undefined;
+	let latestCacheHitRatio: number | undefined;
+	const chromeState = (): TuiViewState => ({
+		projectRoot,
+		provider,
+		model,
+		thinkingLevel,
+		contextTokens: latestContextTokens,
+		contextLimit: input.contextLimit,
+		cacheHitRatio: latestCacheHitRatio,
+		providerConfigured,
+		status: phase,
+		input: editor.getText(),
+		messages: [],
+		queuedRequests: queuedRequests.map(({ objective }) => objective),
+		workspace,
+	});
+
 	const header = new Text("", 0, 0);
+	const brand = new Text("", 0, 0);
+	const divider = new Text("", 0, 0);
 	const updateHeader = () => {
-		header.setText(
-			identityRail(
-				{
-					projectRoot,
-					provider,
-					model,
-					thinkingLevel,
-					providerConfigured,
-					status: phase,
-					input: editor.getText(),
-					messages: [],
-					queuedRequests: queuedRequests.map(({ objective }) => objective),
-					workspace,
-				},
-				layoutTuiFrame(process.stdout.columns || 120, process.stdout.rows || 36),
-			),
-		);
+		const layout = layoutTuiFrame(process.stdout.columns || 120, process.stdout.rows || 36);
+		header.setText(contextHeaderRail(chromeState(), layout));
+		brand.setText(identityRail(chromeState(), layout));
+		divider.setText(accent("─".repeat(layout.columns)));
 	};
 	updateHeader();
-	ui.addChild(header);
 	ui.addChild(transcript);
 	ui.addChild(status);
 	ui.addChild(editor);
+	ui.addChild(divider);
+	ui.addChild(header);
+	ui.addChild(brand);
 
+	const viewportHeight = () => transcriptViewportRows(process.stdout.rows || 36, 0, process.stdout.columns || 120);
+	const followTranscript = () => {
+		scrollOffset.value = 0;
+		detachedNewCount = 0;
+	};
+	const baseEditorHandleInput = editor.handleInput.bind(editor);
+	editor.handleInput = (data: string) => {
+		if (data === TUI_SCROLL_KEYS.pageUp) {
+			scrollOffset.value += viewportHeight();
+		} else if (data === TUI_SCROLL_KEYS.altUp) {
+			scrollOffset.value += 1;
+		} else if (data === TUI_SCROLL_KEYS.pageDown || data === TUI_SCROLL_KEYS.altDown) {
+			scrollOffset.value = Math.max(
+				0,
+				scrollOffset.value - (data === TUI_SCROLL_KEYS.pageDown ? viewportHeight() : 1),
+			);
+		} else if (data === TUI_SCROLL_KEYS.altEnd) {
+			followTranscript();
+		} else {
+			baseEditorHandleInput(data);
+			return;
+		}
+		updateChrome();
+	};
 	const activeTaskCount = () => (activeExecution ? 1 : 0) + (desktopOperation ? 1 : 0);
 	const hasResumableChat = () =>
 		workspace.chats.some((chat) => chat.status === "running" || chat.status === "paused" || chat.status === "queued");
@@ -580,6 +689,7 @@ export async function runTui(input: {
 				activeCount: activeTaskCount(),
 				resumable: hasResumableChat(),
 				canceled: canceledActive,
+				detachedNew: detachedNewCount,
 			}),
 		);
 		updateHeader();
@@ -590,6 +700,7 @@ export async function runTui(input: {
 		updateChrome();
 	};
 	const appendText = (value: string) => {
+		if (scrollOffset.value > 0) detachedNewCount += 1;
 		transcriptEntries.push(value);
 		while (transcriptEntries.length > 180) transcriptEntries.shift();
 		ui.requestRender();
@@ -603,19 +714,42 @@ export async function runTui(input: {
 		for (const line of proposal.diff.split("\n").slice(0, 16)) appendText(line);
 		appendText(warning("Press y to apply · n to reject"));
 	};
+	const assistantFlow = new AssistantTranscriptFlow(
+		(entry) => {
+			appendText(entry);
+			return transcriptEntries.length - 1;
+		},
+		(index, entry) => {
+			const current = transcriptEntries[index];
+			if (current === undefined || !current.startsWith(`${ASSISTANT_DISPLAY_NAME} `)) {
+				appendText(entry);
+				return;
+			}
+			transcriptEntries[index] = entry;
+			ui.requestRender();
+		},
+		(index, entry) => {
+			transcriptEntries.splice(index, 0, entry);
+			ui.requestRender();
+		},
+	);
 
 	updateChrome();
 
 	const onTaskEvent = (event: CodingTaskEvent) => {
 		if (event.type === "session.started") {
+			provider = event.provider;
+			model = event.model;
+			updateChrome();
 			if (activeTuiRequestId && !activeTuiRequestHandedOff) {
 				database.completeTuiRequest(activeTuiRequestId, "completed");
 				activeTuiRequestHandedOff = true;
 				refreshQueue();
 			}
 		} else if (event.type === "model.completed") {
-			appendText(`Thought: ${seconds(event.durationMs)}`);
-			pendingResponseMetrics = formatResponseMetrics({ ...event.usage, durationMs: event.durationMs });
+			if (event.usage.input !== null) latestContextTokens = event.usage.input;
+			assistantFlow.noteThought(`Thought: ${seconds(event.durationMs)}`);
+			assistantFlow.noteMetrics(formatResponseMetrics({ ...event.usage, durationMs: event.durationMs }));
 		} else if (event.type === "capability.started") {
 			updateChrome(`${event.capability}…`);
 		} else if (event.type === "capability.completed") {
@@ -635,10 +769,10 @@ export async function runTui(input: {
 					`${event.durationMs.toFixed(1)} ms`,
 				)}`,
 			);
+		} else if (event.type === "assistant.delta") {
+			assistantFlow.delta(event.text);
 		} else if (event.type === "assistant.message") {
-			appendText(`${ASSISTANT_DISPLAY_NAME} ${event.text}`);
-			if (pendingResponseMetrics) appendText(pendingResponseMetrics);
-			pendingResponseMetrics = undefined;
+			assistantFlow.complete(event.text);
 		}
 	};
 	const requestApproval = (_proposal: CodingTaskPatchProposal): Promise<boolean> =>
@@ -656,7 +790,7 @@ export async function runTui(input: {
 		canceledActive = false;
 		activeTuiRequestId = request?.id;
 		activeTuiRequestHandedOff = false;
-		pendingResponseMetrics = undefined;
+		assistantFlow.reset();
 		activeController = new AbortController();
 		if (resume) appendUser(`/resume ${resumeSessionId === "" ? "" : resumeSessionId.slice(-8)}`.trim());
 		updateChrome(resume ? "recovering…" : "planning…");
@@ -1036,6 +1170,7 @@ export async function runTui(input: {
 	editor.onSubmit = async (value) => {
 		const objective = value.trim();
 		if (!objective) return;
+		followTranscript();
 		editor.addToHistory(objective);
 		editor.setText("");
 		const parsedCommand = parseTuiCommand(objective);

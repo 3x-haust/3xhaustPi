@@ -375,8 +375,8 @@ describe("standalone runtime foundations", () => {
 		const evidence = createStableProjectEvidence(repositoryRoot, 128);
 
 		expect(evidence.text).toHaveLength(128);
-		expect(() => createStableProjectEvidence(repositoryRoot, 0)).toThrow(/1 to 18,000/);
-		expect(() => createStableProjectEvidence(repositoryRoot, 18_001)).toThrow(/1 to 18,000/);
+		expect(() => createStableProjectEvidence(repositoryRoot, 0)).toThrow(/1 to 1,048,576/);
+		expect(() => createStableProjectEvidence(repositoryRoot, 1_048_577)).toThrow(/1 to 1,048,576/);
 	});
 
 	it("exposes bounded new-file slots for an empty project", () => {

@@ -1,3 +1,4 @@
+import { runAgentTask } from "./agent-runtime.ts";
 import { resumeCodingTask, runCodingTask } from "./coding-runtime.ts";
 import type { TuiRuntimeRequest } from "./tui-runtime-client.ts";
 
@@ -35,15 +36,7 @@ async function execute(request: TuiRuntimeRequest): Promise<void> {
 	};
 	const result =
 		request.mode === "run"
-			? await runCodingTask({
-					projectRoot: request.projectRoot,
-					objective: request.objective,
-					approve: false,
-					...hooks,
-					resources: { enabled: true, allowProjectHooks: request.allowProjectHooks },
-					...(request.provider ? { provider: request.provider } : {}),
-					...(request.model ? { model: request.model } : {}),
-				})
+			? await executeRun(request, hooks)
 			: await resumeCodingTask({
 					projectRoot: request.projectRoot,
 					approve: false,
@@ -52,6 +45,48 @@ async function execute(request: TuiRuntimeRequest): Promise<void> {
 					...(request.sessionId ? { sessionId: request.sessionId } : {}),
 				});
 	send({ type: "result", available: result !== undefined, ...(result === undefined ? {} : { result }) });
+}
+
+/**
+ * Full agent runtime first; the legacy semantic task stays as a stability
+ * fallback while the migration settles.
+ */
+async function executeRun(
+	request: Extract<TuiRuntimeRequest, { mode: "run" }>,
+	hooks: {
+		onEvent: NonNullable<Parameters<typeof runCodingTask>[0]["onEvent"]>;
+		requestApproval: NonNullable<Parameters<typeof runCodingTask>[0]["requestApproval"]>;
+		signal: AbortSignal;
+	},
+) {
+	try {
+		return await runAgentTask({
+			projectRoot: request.projectRoot,
+			objective: request.objective,
+			...(request.provider ? { provider: request.provider } : {}),
+			...(request.model ? { model: request.model } : {}),
+			...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+			signal: hooks.signal,
+			onEvent: hooks.onEvent,
+		});
+	} catch (error) {
+		send({
+			type: "event",
+			event: {
+				type: "assistant.message",
+				text: `Agent runtime unavailable, falling back: ${error instanceof Error ? error.message : String(error)}`,
+			},
+		});
+		return runCodingTask({
+			projectRoot: request.projectRoot,
+			objective: request.objective,
+			approve: false,
+			...hooks,
+			resources: { enabled: true, allowProjectHooks: request.allowProjectHooks },
+			...(request.provider ? { provider: request.provider } : {}),
+			...(request.model ? { model: request.model } : {}),
+		});
+	}
 }
 
 process.on("message", (message: unknown) => {

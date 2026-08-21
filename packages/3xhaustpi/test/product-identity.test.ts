@@ -39,14 +39,15 @@ describe("product identity surfaces", () => {
 		expect(version).toBe(PRODUCT_VERSION);
 	});
 
-	it("renders polished product chrome and unlabeled assistant prose without exposing the machine name", () => {
+	it("renders polished product chrome and unlabeled assistant prose", () => {
 		const output = renderTuiFrame(state, 72, 24)
 			.split("\n")
 			.map((line) => stripAnsi(line));
-		expect(output[0]).toBe(PRODUCT_DISPLAY_NAME);
+		expect(output.at(-2)).toContain("gpt-5.6-terra");
+		expect(output.at(-1)).toContain(PRODUCT_DISPLAY_NAME);
 		expect(output.some((line) => line.trim() === ASSISTANT_DISPLAY_NAME)).toBe(false);
 		expect(output.some((line) => line.trim() === "Identity check")).toBe(true);
-		expect(output.join("\n")).not.toContain(PRODUCT_MACHINE_NAME);
+		expect(output.join("\n")).not.toContain(`mem:${PRODUCT_MACHINE_NAME}`);
 	});
 
 	it("normalizes machine and generic assistant transcript prefixes without rendering a label", () => {

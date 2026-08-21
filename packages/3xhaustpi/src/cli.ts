@@ -8,6 +8,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseProjectId } from "@3xhaust/semantic-contract";
 import { compileSemanticOutput, createCoordinatorState, enqueueTurn, startNextTurn } from "../../core/src/index.ts";
+import { runAgentTask } from "./agent-runtime.ts";
 import { CliArgumentError, parseCliArgs, type ThreeXhaustCommand } from "./args.ts";
 import { type CodingTaskEvent, resumeCodingTask, runCodingTask } from "./coding-runtime.ts";
 import { collectConnections, renderConnections } from "./connections.ts";
@@ -416,20 +417,38 @@ async function run(command: Extract<ThreeXhaustCommand, { readonly kind: "run" }
 	if (!command.prompt && process.stdin.isTTY && process.stdout.isTTY) {
 		return runTui({
 			projectRoot: project,
+			thinkingLevel: "medium",
 			...(command.provider ? { provider: command.provider } : {}),
 			...(command.model ? { model: command.model } : {}),
-			runTask: (projectRoot, objective, hooks, selectedModel) =>
-				runCodingTask({
-					projectRoot,
-					objective,
-					approve: false,
-					onEvent: hooks.onEvent,
-					requestApproval: hooks.requestApproval,
-					signal: hooks.signal,
-					resources: { enabled: true, allowProjectHooks: command.allowProjectHooks },
-					provider: selectedModel.provider,
-					model: selectedModel.model,
-				}),
+			runTask: async (projectRoot, objective, hooks, selectedModel) => {
+				try {
+					return await runAgentTask({
+						projectRoot,
+						objective,
+						onEvent: hooks.onEvent,
+						signal: hooks.signal,
+						provider: selectedModel.provider,
+						model: selectedModel.model,
+						thinkingLevel: "medium",
+					});
+				} catch (error) {
+					hooks.onEvent({
+						type: "assistant.message",
+						text: `Agent runtime unavailable, falling back: ${error instanceof Error ? error.message : String(error)}`,
+					});
+					return runCodingTask({
+						projectRoot,
+						objective,
+						approve: false,
+						onEvent: hooks.onEvent,
+						requestApproval: hooks.requestApproval,
+						signal: hooks.signal,
+						resources: { enabled: true, allowProjectHooks: command.allowProjectHooks },
+						provider: selectedModel.provider,
+						model: selectedModel.model,
+					});
+				}
+			},
 			resumeTask: (projectRoot, sessionId, hooks) =>
 				resumeCodingTask({
 					approve: false,
@@ -443,15 +462,29 @@ async function run(command: Extract<ThreeXhaustCommand, { readonly kind: "run" }
 		});
 	}
 	if (!command.prompt) throw new Error(`Request ${requestId} (${fingerprint}) has no objective`);
-	await runCodingTask({
-		projectRoot: project,
-		objective: command.prompt,
-		approve: command.approve,
-		onEvent: printCodingTaskEvent,
-		resources: { enabled: true, allowProjectHooks: command.allowProjectHooks },
-		...(command.provider ? { provider: command.provider } : {}),
-		...(command.model ? { model: command.model } : {}),
-	});
+	try {
+		await runAgentTask({
+			projectRoot: project,
+			objective: command.prompt,
+			onEvent: printCodingTaskEvent,
+			thinkingLevel: "medium",
+			...(command.provider ? { provider: command.provider } : {}),
+			...(command.model ? { model: command.model } : {}),
+		});
+	} catch (error) {
+		console.error(
+			`Agent runtime unavailable, falling back: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		await runCodingTask({
+			projectRoot: project,
+			objective: command.prompt,
+			approve: command.approve,
+			onEvent: printCodingTaskEvent,
+			resources: { enabled: true, allowProjectHooks: command.allowProjectHooks },
+			...(command.provider ? { provider: command.provider } : {}),
+			...(command.model ? { model: command.model } : {}),
+		});
+	}
 }
 
 async function execute(command: ThreeXhaustCommand): Promise<void> {

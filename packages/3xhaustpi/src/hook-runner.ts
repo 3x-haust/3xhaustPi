@@ -55,6 +55,8 @@ function sanitizedEvent(event: CodingTaskEvent): Readonly<Record<string, unknown
 				command: event.command,
 				durationMs: event.durationMs,
 			};
+		case "assistant.delta":
+			return { schemaVersion: 1, type: event.type };
 		case "assistant.message":
 			return { schemaVersion: 1, type: event.type };
 		case "session.completed":

@@ -155,6 +155,7 @@ class ThreeXhaustPiSemanticSession implements PiSemanticModelSession {
 			sessionId: phaseCacheKey,
 			promptCacheKey: phaseCacheKey,
 			...(this.#binding.model.api === "openai-codex-responses" ? { transport: "websocket" as const } : {}),
+			...(this.#binding.reasoning ? { reasoning: this.#binding.reasoning } : {}),
 			maxRetries: 0,
 			maxTokens: this.#binding.maxTokens ?? 4_096,
 		};

@@ -1,3 +1,4 @@
+import { ASSISTANT_DISPLAY_NAME } from "./product-identity.ts";
 import {
 	cellWidth,
 	dim,
@@ -52,6 +53,7 @@ export function formatTranscriptEntry(value: string): TuiTranscriptTemplate {
 	}
 	if (/^Thought:/u.test(visible)) return { role: "thought", label: "", content: visible };
 	if (/^Stats:/u.test(visible)) return { role: "metrics", label: "", content: without(/^Stats:\s*/u) };
+	if (/^TPS\b/u.test(visible)) return { role: "metrics", label: "", content: visible };
 	if (
 		/^(Patch ready|Press y|Computer action ready|✓ Patch approved|✓ Computer action approved|Patch rejected)\b/u.test(
 			visible,
@@ -66,6 +68,71 @@ export function formatTranscriptEntry(value: string): TuiTranscriptTemplate {
 		return { role: "tool", label: muted("tool"), content: visible };
 	if (/^(agent|chat|Intent →)\b/u.test(visible)) return { role: "agent", label: muted("agent"), content: visible };
 	return { role: "system", label: dim("system"), content: visible };
+}
+
+export interface TranscriptFeedHooks {
+	readonly push: (entry: string) => number;
+	readonly replace: (index: number, entry: string) => void;
+	readonly insert: (index: number, entry: string) => void;
+}
+
+/**
+ * Owns the assistant response flow in the transcript: streaming deltas update
+ * one unlabeled prose entry in place; thought timing lands above the answer and
+ * response metrics below it, per the DESIGN.md response grammar.
+ */
+export class AssistantTranscriptFlow {
+	readonly #hooks: TranscriptFeedHooks;
+	#streamIndex: number | undefined;
+	#streamed = "";
+	#metrics: string | undefined;
+
+	constructor(
+		push: TranscriptFeedHooks["push"],
+		replace: TranscriptFeedHooks["replace"],
+		insert: TranscriptFeedHooks["insert"],
+	) {
+		this.#hooks = { push, replace, insert };
+	}
+
+	delta(value: string): void {
+		if (!value) return;
+		this.#streamed += value;
+		const entry = `${ASSISTANT_DISPLAY_NAME} ${this.#streamed}`;
+		if (this.#streamIndex === undefined) this.#streamIndex = this.#hooks.push(entry);
+		else this.#hooks.replace(this.#streamIndex, entry);
+	}
+
+	noteThought(label: string): void {
+		if (this.#streamIndex !== undefined) {
+			this.#hooks.insert(this.#streamIndex, label);
+			this.#streamIndex += 1;
+			return;
+		}
+		this.#hooks.push(label);
+	}
+
+	noteMetrics(line: string): void {
+		this.#metrics = line;
+	}
+
+	complete(text: string): void {
+		const entry = `${ASSISTANT_DISPLAY_NAME} ${text}`;
+		if (this.#streamIndex !== undefined) this.#hooks.replace(this.#streamIndex, entry);
+		else this.#hooks.push(entry);
+		if (this.#metrics !== undefined) {
+			this.#hooks.push(this.#metrics);
+			this.#metrics = undefined;
+		}
+		this.#streamIndex = undefined;
+		this.#streamed = "";
+	}
+
+	reset(): void {
+		this.#streamIndex = undefined;
+		this.#streamed = "";
+		this.#metrics = undefined;
+	}
 }
 
 function wrapPlainLine(value: string, columns: number): string[] {

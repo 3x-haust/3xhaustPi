@@ -65,7 +65,9 @@ export class ThreeXhaustState {
 	constructor(path = resolveStatePath()) {
 		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 		this.#database = new DatabaseSync(path);
-		this.#database.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;");
+		this.#database.exec(
+			"PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;",
+		);
 		this.#database.exec(`
 			CREATE TABLE IF NOT EXISTS projects (
 				project_id TEXT PRIMARY KEY,

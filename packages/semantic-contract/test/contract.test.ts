@@ -150,12 +150,11 @@ describe("3xhaustpi semantic protocol v2", () => {
 		}
 	});
 
-	it("keeps declared source and hint text inert while enforcing bounds", () => {
+	it("keeps declared source and hint text inert without prompt length caps", () => {
 		expect(parseSemanticOutput(workIntent)).toEqual(workIntent);
 		expect(parseSemanticOutput(patchProposal)).toEqual(patchProposal);
-		expect(() =>
-			parseSemanticOutput({ ...workIntent, payload: { ...workIntent.payload, objective: "x".repeat(4_097) } }),
-		).toThrow(/length/i);
+		const longObjective = { ...workIntent, payload: { ...workIntent.payload, objective: "x".repeat(4_097) } };
+		expect(parseSemanticOutput(longObjective)).toEqual(longObjective);
 		expect(() =>
 			parseSemanticOutput({
 				...patchProposal,

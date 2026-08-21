@@ -7,6 +7,7 @@ import type {
 	ImageContent,
 	Model,
 	SimpleStreamOptions,
+	ThinkingLevel,
 } from "@earendil-works/pi-ai";
 
 export type CacheUsageSupport = "reported" | "unsupported" | "unknown";
@@ -24,6 +25,7 @@ export interface PiSemanticConnectionBinding {
 	/** Bounded, relevant, byte-stable project evidence placed before the per-turn delta. */
 	readonly stableContext?: string;
 	readonly maxTokens?: number;
+	readonly reasoning?: ThinkingLevel;
 }
 
 export type PiComplete = (

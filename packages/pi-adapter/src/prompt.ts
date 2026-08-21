@@ -1,5 +1,6 @@
 import type { SemanticTurnRequest } from "@3xhaust/semantic-contract";
 import type { Context, ImageContent } from "@earendil-works/pi-ai";
+import { compactContext } from "./compaction.ts";
 
 export const X3HAUST_SEMANTIC_STABLE_PREFIX = [
 	"3xhaustpi cache-v29 semantic reasoning boundary for protocol v2.",
@@ -120,7 +121,7 @@ export function createSemanticContext(
 	images: readonly ImageContent[] = [],
 ): Context {
 	if (stableContext !== undefined && stableContext.length > 18_000) {
-		throw new Error("Stable semantic context exceeds the 18,000-character bound");
+		stableContext = compactContext(stableContext, 4_500);
 	}
 	const stablePrompt =
 		stableContext === undefined
