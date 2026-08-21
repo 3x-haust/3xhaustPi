@@ -278,7 +278,8 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 				context.tools,
 				model.compat?.supportsOpenAIGrammarTools ?? false,
 			);
-			const resourceSessionId = options?.sessionId;
+			const resourceSessionId =
+				options?.cacheRetention === "none" ? undefined : clampOpenAIPromptCacheKey(options?.sessionId);
 			const promptCacheKey =
 				options?.cacheRetention === "none" ? undefined : (options?.promptCacheKey ?? resourceSessionId);
 			const codexPromptCacheKey = clampOpenAIPromptCacheKey(promptCacheKey);
