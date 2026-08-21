@@ -169,40 +169,40 @@ describe("standalone runtime foundations", () => {
 
 	it("exposes only requested skill slots and existing skill documents under the hidden skills directory", () => {
 		const project = temporaryDirectory();
-		mkdirSync(join(project, ".3xhaustpi", "skills", "deploy-checklist"), { recursive: true });
-		mkdirSync(join(project, ".3xhaustpi", "skills", "notes"), { recursive: true });
+		mkdirSync(join(project, ".3xhaust", "skills", "deploy-checklist"), { recursive: true });
+		mkdirSync(join(project, ".3xhaust", "skills", "notes"), { recursive: true });
 		writeFileSync(join(project, "package.json"), "{}\n");
 		writeFileSync(join(project, ".env"), "SECRET=value\n");
-		writeFileSync(join(project, ".3xhaustpi", "config.json"), "{}\n");
-		writeFileSync(join(project, ".3xhaustpi", "skills", "deploy-checklist", "SKILL.md"), "# Deploy Checklist\n");
-		writeFileSync(join(project, ".3xhaustpi", "skills", "notes", "draft.txt"), "hidden notes\n");
+		writeFileSync(join(project, ".3xhaust", "config.json"), "{}\n");
+		writeFileSync(join(project, ".3xhaust", "skills", "deploy-checklist", "SKILL.md"), "# Deploy Checklist\n");
+		writeFileSync(join(project, ".3xhaust", "skills", "notes", "draft.txt"), "hidden notes\n");
 
 		const createSkill = createProjectSnapshot(project, "npm-release 스킬 만들어줘");
 		expect(createSkill.documents.map(({ relativePath }) => relativePath)).toEqual([
-			".3xhaustpi/skills/deploy-checklist/SKILL.md",
+			".3xhaust/skills/deploy-checklist/SKILL.md",
 			"package.json",
-			".3xhaustpi/skills/npm-release/SKILL.md",
+			".3xhaust/skills/npm-release/SKILL.md",
 			"src/server.js",
 		]);
 		expect(
-			createSkill.documents.find(({ relativePath }) => relativePath === ".3xhaustpi/skills/npm-release/SKILL.md"),
+			createSkill.documents.find(({ relativePath }) => relativePath === ".3xhaust/skills/npm-release/SKILL.md"),
 		).toMatchObject({
 			virtual: true,
 		});
 		expect(createSkill.documents.map(({ relativePath }) => relativePath)).not.toContain(".env");
-		expect(createSkill.documents.map(({ relativePath }) => relativePath)).not.toContain(".3xhaustpi/config.json");
+		expect(createSkill.documents.map(({ relativePath }) => relativePath)).not.toContain(".3xhaust/config.json");
 		expect(createSkill.documents.map(({ relativePath }) => relativePath)).not.toContain(
-			".3xhaustpi/skills/notes/draft.txt",
+			".3xhaust/skills/notes/draft.txt",
 		);
 
 		const ambiguous = createProjectSnapshot(project, "create skill npm-release deploy-helper");
 		expect(ambiguous.documents.map(({ relativePath }) => relativePath)).not.toContain(
-			".3xhaustpi/skills/npm-release/SKILL.md",
+			".3xhaust/skills/npm-release/SKILL.md",
 		);
 
 		const invalid = createProjectSnapshot(project, "create skill NPM_Release");
 		expect(invalid.documents.map(({ relativePath }) => relativePath)).not.toContain(
-			".3xhaustpi/skills/NPM_Release/SKILL.md",
+			".3xhaust/skills/NPM_Release/SKILL.md",
 		);
 	});
 

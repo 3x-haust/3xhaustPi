@@ -54,6 +54,36 @@ describe("Editor component", () => {
 			assert.doesNotMatch(populated, /Ask anything/u);
 			assert.match(populated, /› inspect src/u);
 		});
+
+		it("supports a native shell composer with only a top rule", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme, {
+				promptPrefix: "> ",
+				bottomBorder: false,
+			});
+
+			const output = editor.render(40).map(stripVTControlCharacters);
+
+			assert.strictEqual(output.length, 2);
+			assert.match(output[0] ?? "", /^─{40}$/u);
+			assert.match(output[1] ?? "", /^> /u);
+		});
+
+		it("keeps a long multiline draft inside a one-row shell composer", () => {
+			const editor = new Editor(createTestTUI(56, 22), defaultEditorTheme, {
+				promptPrefix: "> ",
+				bottomBorder: false,
+				maxVisibleLines: 1,
+			});
+			const draft = `${"긴 입력 ".repeat(40)}\nsecond line`;
+			editor.setText(draft);
+
+			const output = editor.render(56).map(stripVTControlCharacters);
+
+			assert.strictEqual(output.length, 2);
+			assert.match(output[0] ?? "", /↑/u);
+			assert.match(output[1] ?? "", /second line/u);
+			assert.strictEqual(editor.getText(), draft);
+		});
 	});
 
 	describe("Prompt history navigation", () => {

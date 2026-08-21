@@ -475,7 +475,7 @@ function applyPreparedFiles(
 	try {
 		for (const file of files) {
 			const path = join(projectRoot, file.document.relativePath);
-			const temporary = `${path}.3xhaustpi-${process.pid}.tmp`;
+			const temporary = `${path}.3xhaust-${process.pid}.tmp`;
 			mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
 			writeFileSync(temporary, file.after, {
 				encoding: "utf8",

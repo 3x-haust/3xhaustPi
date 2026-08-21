@@ -40,7 +40,7 @@ OpenAI Codex OAuth:
 
 로그인 URL을 기본 브라우저에 열고 grant가 끝나면 credential을 macOS
 Keychain, Windows Credential Manager 또는 Linux Secret Service에 저장합니다.
-`~/.3xhaustpi/auth.json`에는 provider/type/storage metadata만 mode `0600`으로
+`~/.3xhaust/auth.json`에는 provider/type/storage metadata만 mode `0600`으로
 남습니다. 기존 secret-bearing JSON은 OS store write/readback 검증 후
 metadata-only 형식으로 자동 마이그레이션합니다. API-key provider와 사용
 가능한 OAuth/subscription provider는 다음 명령으로 확인합니다.

@@ -4,6 +4,7 @@ import {
 	footerSegmentOrder,
 	formatHelpCommandLines,
 	formatModelCommandLines,
+	formatResponseMetrics,
 	formatStatusFooter,
 	formatSubmittedPromptTurn,
 	formatTranscriptEntry,
@@ -15,6 +16,7 @@ import {
 	renderTuiFrame,
 	resolveCtrlCAction,
 	resolveModelSelection,
+	sanitizeTerminalText,
 	stripAnsi,
 	TranscriptViewport,
 	type TuiViewState,
@@ -79,7 +81,9 @@ describe("Pi-native event-driven TUI renderer", () => {
 			expect(layout.columns).toBe(columns);
 			expect(layout.rows).toBe(rows);
 			expect(layout.mode).toBe(mode);
-			expect(layout.composerRows).toBe(3);
+			expect(layout.contextRows).toBe(0);
+			expect(layout.composerRows).toBe(2);
+			expect(layout.footerRows).toBe(0);
 			expect(layout.transcriptRows).toBeGreaterThanOrEqual(1);
 			expect(layout.totalRows).toBeLessThanOrEqual(rows);
 			expect(layout.autocompleteRows).toBeLessThanOrEqual(Math.floor(rows * 0.4));
@@ -102,8 +106,8 @@ describe("Pi-native event-driven TUI renderer", () => {
 			});
 			expectFrameWithin(output, columns, rows);
 			expectNoDuplicateIdentity(output);
-			expect(output).toContain("›");
-			expect(output).toMatch(/ready|working/u);
+			expect(output).toContain(">");
+			expect(output).toMatch(/Ready|Working/u);
 		}
 	});
 
@@ -129,34 +133,32 @@ describe("Pi-native event-driven TUI renderer", () => {
 	it("keeps one information authority per rail", () => {
 		const output = renderTuiFrame({ ...state, activeTasks: 0 }, 120, 32);
 		const lines = visibleLines(output);
-		expect(lines[0]).toBe("3xhaustPi  project");
-		expect(lines[0]).not.toMatch(/ready|gpt|openai|context|tasks/u);
-		expect(lines).toContainEqual(expect.stringContaining("queued  1 waiting"));
-		expect(output).toContain("gpt-5.6-terra:medium");
-		expect(output).toContain("35K/400K (8.8%)");
+		expect(lines[0]).toBe("3xhaustPi: project (gpt-5.6-terra)");
+		expect(lines[0]).not.toMatch(/ready|openai|context|tasks/u);
+		expect(lines).toContainEqual(expect.stringContaining("• Queued (1 waiting)"));
 		expect(lines.join("\n")).not.toContain("…/project");
-		expect(lines.join("\n")).toContain("queue 1 · tasks 0");
+		expect(lines.at(-2)).toMatch(/^─+$/u);
+		expect(lines.at(-1)).toContain("> ");
 	});
 
-	it("uses a deterministic footer segment priority table", () => {
+	it("keeps the model in the wide title instead of a permanent footer", () => {
 		expect(footerSegmentOrder()).toEqual(["model", "context", "provider", "tasks"]);
-		const minimalFooter = visibleLines(renderTuiFrame(state, 40, 12)).at(-1) ?? "";
-		expect(minimalFooter).toContain("gpt-5.6-terra:medium");
-		expect(minimalFooter).not.toContain("openai-codex");
-		const wideFooter = visibleLines(renderTuiFrame(state, 120, 12)).at(-1) ?? "";
-		expect(wideFooter).toContain("35K/400K (8.8%)");
-		expect(wideFooter).toContain("openai-codex auto");
-		expect(wideFooter).not.toContain("…/project");
+		const minimal = visibleLines(renderTuiFrame(state, 40, 12));
+		expect(minimal[0]).toBe("3xhaustPi");
+		expect(minimal.at(-1)).toContain("> ");
+		const wide = visibleLines(renderTuiFrame(state, 120, 12));
+		expect(wide[0]).toContain("(gpt-5.6-terra)");
+		expect(wide.at(-1)).toContain("> ");
+		expect(wide.join("\n")).not.toContain("openai-codex auto");
 	});
 
 	it("removes command hints and provider metadata below sixty columns", () => {
 		const output = visibleLines(renderTuiFrame(state, 56, 22));
-		const footer = output.at(-1) ?? "";
 
 		expect(output.join("\n")).not.toContain("/help  /model  /exit");
-		expect(footer).toContain("gpt-5.6-terra:medium");
-		expect(footer).toContain("35K/400K");
-		expect(footer).not.toContain("openai-codex");
+		expect(output[0]).toBe("3xhaustPi: project");
+		expect(output.at(-1)).toContain("> ");
+		expect(output.join("\n")).not.toContain("openai-codex");
 	});
 
 	it("never admits a lower-priority footer segment after a higher one cannot fit", () => {
@@ -170,7 +172,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 		const layout = layoutTuiFrame(40, 12, { autocompleteRows: 8 });
 		expect(layout.mode).toBe("minimal");
 		expect(layout.contextRows).toBe(0);
-		expect(layout.identityRows + layout.activityRows + layout.composerRows + layout.footerRows).toBe(6);
+		expect(layout.identityRows + layout.activityRows + layout.composerRows + layout.footerRows).toBe(4);
 		expect(layout.transcriptRows).toBeGreaterThanOrEqual(1);
 		expect(layout.autocompleteRows).toBeLessThanOrEqual(4);
 	});
@@ -182,32 +184,202 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(formatTranscriptEntry("Patch ready  src/a.ts").role).toBe("approval");
 	});
 
-	it("renders user and assistant as separated chat turns without prose rails", () => {
+	it("uses a full-width prompt band and never renders speaker labels", () => {
+		const output = renderTuiFrame(
+			{
+				...state,
+				messages: ["You 안녕", "3xhaust 안녕하세요. 무엇을 도와드릴까요?"],
+				queuedRequests: [],
+			},
+			120,
+			24,
+		);
+		const rawLines = output.split("\n");
+		const visible = visibleLines(output);
+		const promptLine = visible.findIndex((line) => line.includes("안녕"));
+		const answerLine = visible.findIndex((line) => line.includes("안녕하세요."));
+
+		expect(promptLine).toBeGreaterThanOrEqual(0);
+		expect(rawLines[promptLine]).toContain("\u001b[48;5;238m");
+		expect(cellWidth(visible[promptLine] ?? "")).toBe(120);
+		expect(answerLine).toBeGreaterThan(promptLine);
+		expect(visible[answerLine]).toMatch(/^ {2}안녕하세요/u);
+		expect(visible.join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
+	});
+
+	it("renders thought work answer and measured metadata as one unlabeled flow", () => {
 		const output = visibleLines(
 			renderTuiFrame(
 				{
 					...state,
 					messages: [
-						"You Please inspect the authentication callback and explain why the persisted session is rejected.",
-						"3xhaust The callback validates the old session before rotating its token, so expired records fail early.",
+						"You 설정 파일을 확인해",
+						"Thought: 1.2s",
+						"✓ readRanges  84.0 ms · settings.json inspected",
+						"3xhaust 설정 값은 유효합니다.",
+						"Stats: TPS 15.8 tok/s · Cache hit 0.0% · 4.5s",
 					],
 					queuedRequests: [],
 				},
-				48,
-				18,
+				120,
+				26,
 			),
 		);
-		const userHeader = output.indexOf("  You");
-		const assistantHeader = output.indexOf("  3xhaust", userHeader + 1);
-		expect(userHeader).toBeGreaterThanOrEqual(0);
-		expect(assistantHeader).toBeGreaterThan(userHeader);
-		expect(output[userHeader + 1]).toMatch(/^ {4}Please inspect/u);
-		expect(output[assistantHeader + 1]).toMatch(/^ {4}The callback/u);
-		expect(output.slice(userHeader, assistantHeader + 2).join("\n")).not.toContain("│");
-		expect(output.slice(userHeader + 1, assistantHeader)).toContain("");
+		const thought = output.findIndex((line) => line.includes("Thought: 1.2s"));
+		const work = output.findIndex((line) => line.includes("settings.json inspected"));
+		const answer = output.findIndex((line) => line.includes("설정 값은 유효합니다."));
+		const metrics = output.findIndex((line) => line.includes("TPS 15.8 tok/s"));
+
+		expect(thought).toBeGreaterThanOrEqual(0);
+		expect(work).toBeGreaterThan(thought);
+		expect(answer).toBeGreaterThan(work);
+		expect(metrics).toBeGreaterThan(answer);
+		expect(output.join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
 	});
 
-	it("renders dense coding-chat turns with outer gutter and attached tool activity", () => {
+	it("formats only measured response telemetry without inventing values", () => {
+		expect(
+			formatResponseMetrics({
+				input: 1_000,
+				output: 79,
+				cacheRead: 250,
+				durationMs: 5_000,
+			}),
+		).toBe("Stats: TPS 15.8 tok/s · Cache hit 25.0% · 5.0s");
+		expect(formatResponseMetrics({ input: null, output: null, cacheRead: null, durationMs: 1_200 })).toBe(
+			"Stats: 1.2s",
+		);
+	});
+
+	it("keeps an oversized assistant answer visible when response metrics fit", () => {
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: [
+						`3xhaust ANSWER_ANCHOR ${"long response content ".repeat(40)}`,
+						"Stats: TPS 15.8 tok/s · Cache hit 25.0% · 5.0s",
+					],
+					queuedRequests: [],
+				},
+				56,
+				10,
+			),
+		).join("\n");
+
+		expect(output).toContain("ANSWER_ANCHOR");
+		expect(output).toContain("TPS 15.8 tok/s");
+	});
+
+	it("keeps capability work between the thought phases that produced it", () => {
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: [
+						"You inspect settings",
+						"Thought: 1.0s",
+						"✓ searchText  1.5 ms · settings inspected",
+						"Thought: 0.8s",
+						"3xhaust Settings are valid.",
+						"Stats: TPS 12.0 tok/s · 0.8s",
+					],
+					queuedRequests: [],
+				},
+				72,
+				20,
+			),
+		);
+		const firstThought = output.findIndex((line) => line.includes("Thought: 1.0s"));
+		const work = output.findIndex((line) => line.includes("settings inspected"));
+		const secondThought = output.findIndex((line) => line.includes("Thought: 0.8s"));
+		const answer = output.findIndex((line) => line.includes("Settings are valid."));
+		const metrics = output.findIndex((line) => line.includes("TPS 12.0 tok/s"));
+
+		expect(firstThought).toBeLessThan(work);
+		expect(work).toBeLessThan(secondThought);
+		expect(secondThought).toBeLessThan(answer);
+		expect(answer).toBeLessThan(metrics);
+	});
+
+	it("shows prompt content instead of surface spacers in a one-row transcript budget", () => {
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					messages: ["You VISIBLE_PROMPT"],
+					queuedRequests: [],
+				},
+				120,
+				5,
+			),
+		).join("\n");
+
+		expect(output).toContain("VISIBLE_PROMPT");
+	});
+
+	it("removes terminal control sequences from untrusted transcript and activity text", () => {
+		const malicious = "safe\u001b]52;c;Y2xpcGJvYXJk\u0007after\u001b[2J\u001b_payload\u001b\\done";
+
+		expect(sanitizeTerminalText(malicious)).toBe("safeafterdone");
+		const output = renderTuiFrame(
+			{
+				...state,
+				status: "running",
+				activeTasks: 0,
+				messages: [`3xhaust ${malicious}`],
+				queuedRequests: [],
+			},
+			72,
+			16,
+		);
+		expect(output).not.toContain("\u001b]52");
+		expect(output).not.toContain("\u001b[2J");
+		expect(output).not.toContain("Y2xpcGJvYXJk");
+		expect(visibleLines(output).join("\n")).toContain("safeafterdone");
+		expect(stripAnsi(formatTuiActivityLine({ status: "running", detail: malicious }))).toContain("safeafterdone");
+	});
+
+	it("uses one activity row and a top-rule-only shell composer", () => {
+		const layout = layoutTuiFrame(72, 24);
+		const output = visibleLines(renderTuiFrame({ ...state, status: "running", activeTasks: 0 }, 72, 24));
+
+		expect(layout.contextRows).toBe(0);
+		expect(layout.activityRows).toBe(1);
+		expect(layout.composerRows).toBe(2);
+		expect(layout.footerRows).toBe(0);
+		expect(output.at(-3)).toMatch(/^• Working \(/u);
+		expect(output.at(-2)).toMatch(/^─+$/u);
+		expect(output.at(-1)).toContain("> ");
+		expect(output.at(-1)).not.toContain("Ask anything");
+	});
+
+	it("separates prompt surface and assistant prose without speaker rails", () => {
+		const raw = renderTuiFrame(
+			{
+				...state,
+				messages: [
+					"You Please inspect the authentication callback and explain why the persisted session is rejected.",
+					"3xhaust The callback validates the old session before rotating its token, so expired records fail early.",
+				],
+				queuedRequests: [],
+			},
+			48,
+			18,
+		);
+		const output = visibleLines(raw);
+		const prompt = output.findIndex((line) => line.includes("Please inspect"));
+		const answer = output.findIndex((line) => line.includes("The callback"));
+
+		expect(prompt).toBeGreaterThanOrEqual(0);
+		expect(raw.split("\n")[prompt]).toContain("\u001b[48;5;238m");
+		expect(answer).toBeGreaterThan(prompt);
+		expect(output[answer]).toMatch(/^ {2}The callback/u);
+		expect(output.join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
+		expect(output.slice(prompt, answer + 1).join("\n")).not.toContain("│");
+	});
+
+	it("keeps post-answer work attached in the same unlabeled flow", () => {
 		// Given
 		const output = visibleLines(
 			renderTuiFrame(
@@ -226,20 +398,20 @@ describe("Pi-native event-driven TUI renderer", () => {
 		);
 
 		// When
-		const userHeader = output.indexOf("  You");
-		const assistantHeader = output.indexOf("  3xhaust");
-		const toolRow = output.findIndex((line) => line.startsWith("    └ ✓ readRanges"));
+		const prompt = output.findIndex((line) => line.includes("Inspect the authentication callback."));
+		const toolRow = output.findIndex((line) => line.includes("✓ readRanges"));
+		const answer = output.findIndex((line) => line.includes("The expired session"));
 
 		// Then
-		expect(userHeader).toBeGreaterThanOrEqual(0);
-		expect(output[userHeader + 1]).toBe("    Inspect the authentication callback.");
-		expect(output[userHeader + 2]).toBe("");
-		expect(assistantHeader).toBe(userHeader + 3);
-		expect(output[assistantHeader + 1]).toBe("    The expired session is rejected before token rotation.");
-		expect(toolRow).toBe(assistantHeader + 2);
+		expect(prompt).toBeGreaterThanOrEqual(0);
+		expect(answer).toBeGreaterThan(prompt);
+		expect(toolRow).toBeGreaterThan(answer);
+		expect(output[toolRow]).toMatch(/^ {2}✓ readRanges/u);
+		expect(output[answer]).toBe("  The expired session is rejected before token rotation.");
+		expect(output.join("\n")).not.toMatch(/[├└]|^\s*(?:You|3xhaust)\s*$/gmu);
 	});
 
-	it("reparents pre-response tool activity beneath the final assistant header", () => {
+	it("places pre-response work immediately before final assistant prose", () => {
 		// Given
 		const output = visibleLines(
 			renderTuiFrame(
@@ -258,16 +430,17 @@ describe("Pi-native event-driven TUI renderer", () => {
 		);
 
 		// When
-		const assistantHeader = output.indexOf("  3xhaust");
-		const toolRow = output.findIndex((line) => line.startsWith("    └ ✓ readRanges"));
+		const toolRow = output.findIndex((line) => line.includes("✓ readRanges"));
+		const answer = output.findIndex((line) => line.includes("The project summary is available."));
 
 		// Then
-		expect(assistantHeader).toBeGreaterThanOrEqual(0);
-		expect(toolRow).toBe(assistantHeader + 1);
-		expect(output[toolRow + 1]).toBe("    The project summary is available.");
+		expect(toolRow).toBeGreaterThanOrEqual(0);
+		expect(answer).toBe(toolRow + 1);
+		expect(output[answer]).toBe("  The project summary is available.");
+		expect(output.join("\n")).not.toMatch(/^\s*3xhaust\s*$/gmu);
 	});
 
-	it("owns intermediate tool activity with a provisional assistant header", () => {
+	it("shows intermediate work without inventing an assistant label", () => {
 		// Given
 		const output = visibleLines(
 			renderTuiFrame(
@@ -282,12 +455,12 @@ describe("Pi-native event-driven TUI renderer", () => {
 		);
 
 		// When
-		const assistantHeader = output.indexOf("  3xhaust");
-		const toolRow = output.findIndex((line) => line.startsWith("    └ ✓ readRanges"));
+		const toolRow = output.findIndex((line) => line.includes("✓ readRanges"));
 
 		// Then
-		expect(assistantHeader).toBeGreaterThanOrEqual(0);
-		expect(toolRow).toBe(assistantHeader + 1);
+		expect(toolRow).toBeGreaterThanOrEqual(0);
+		expect(output[toolRow]).toMatch(/^ {2}✓ readRanges/u);
+		expect(output.join("\n")).not.toMatch(/^\s*3xhaust\s*$/gmu);
 	});
 
 	it("keeps runtime notices out of the primary transcript when chat turns exist", () => {
@@ -329,13 +502,12 @@ describe("Pi-native event-driven TUI renderer", () => {
 		);
 
 		// When
-		const assistantHeader = output.indexOf("   3xhaust");
-		const bodyRows = output.slice(assistantHeader + 1).filter((line) => line.startsWith("     "));
+		const bodyRows = output.filter((line) => line.startsWith("  compact readable prose"));
 
 		// Then
-		expect(assistantHeader).toBeGreaterThanOrEqual(0);
 		expect(bodyRows.length).toBeGreaterThan(1);
-		for (const line of bodyRows) expect(cellWidth(line)).toBeLessThanOrEqual(101);
+		for (const line of bodyRows) expect(cellWidth(line)).toBeLessThanOrEqual(98);
+		expect(output.join("\n")).not.toMatch(/^\s*3xhaust\s*$/gmu);
 	});
 
 	it("never renders an orphaned conversation body when an older turn does not fit", () => {
@@ -347,10 +519,10 @@ describe("Pi-native event-driven TUI renderer", () => {
 					queuedRequests: [],
 				},
 				40,
-				12,
+				8,
 			),
 		).join("\n");
-		expect(output).toContain("  3xhaust\n    latest answer");
+		expect(output).toContain("  latest answer");
 		expect(output).not.toContain("ORPHAN_MARKER");
 	});
 
@@ -388,8 +560,9 @@ describe("Pi-native event-driven TUI renderer", () => {
 				18,
 			),
 		).join("\n");
-		expect(output).toContain("  ├ chat abc123");
-		expect(output).toContain("  └ ✓ readRanges");
+		expect(output).toContain("  chat abc123");
+		expect(output).toContain("  ✓ readRanges");
+		expect(output).not.toMatch(/[├└]/u);
 		expect(output).not.toContain("agent │");
 		expect(output).not.toContain("tool │");
 	});
@@ -415,7 +588,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 				22,
 			),
 		).join("\n");
-		expect(output).toContain("queued  1 waiting");
+		expect(output).toContain("• Queued (1 waiting)");
 		expect(output).not.toContain("Follow-up request");
 	});
 
@@ -437,29 +610,28 @@ describe("Pi-native event-driven TUI renderer", () => {
 				22,
 			),
 		).join("\n");
-		expect(output).toContain("paused  /resume to continue");
-		expect(output).not.toContain("working  2 active");
+		expect(output).toContain("• Paused (/resume to continue)");
+		expect(output).not.toContain("Working (2 active");
 	});
 
 	it("arbitrates activity by review, failure, foreground work, active aggregate, queue, then ready", () => {
-		expect(stripAnsi(formatTuiActivityLine({ status: "awaiting-approval", detail: "patch" }))).toContain(
-			"review  patch",
+		expect(stripAnsi(formatTuiActivityLine({ status: "awaiting-approval", detail: "patch" }))).toBe(
+			"• Review (patch)",
 		);
-		expect(stripAnsi(formatTuiActivityLine({ status: "error", detail: "diagnostics failed" }))).toContain(
-			"failed  diagnostics failed",
+		expect(stripAnsi(formatTuiActivityLine({ status: "error", detail: "diagnostics failed" }))).toBe(
+			"• Failed (diagnostics failed)",
 		);
 		expect(
 			stripAnsi(formatTuiActivityLine({ status: "running", detail: "write src/some/really-long-file-name.ts" }, 28)),
-		).toMatch(/^working {2}write src\/som…$/u);
-		expect(stripAnsi(formatTuiActivityLine({ status: "ready", activeCount: 2, queuedCount: 4 }))).toContain(
-			"working  2 active",
+		).toMatch(/^• Working \(write src\/som… · esc to interrupt\)$/u);
+		expect(stripAnsi(formatTuiActivityLine({ status: "ready", activeCount: 2, queuedCount: 4 }))).toBe(
+			"• Working (2 active · esc to interrupt)",
 		);
 		expect(
 			stripAnsi(formatTuiActivityLine({ status: "ready", activeCount: 0, queuedCount: 4, resumable: true })),
-		).toContain("paused  /resume to continue · 4 queued");
-		expect(stripAnsi(formatTuiActivityLine({ status: "ready", queuedCount: 4 }))).toContain("queued  4 waiting");
-		expect(stripAnsi(formatTuiActivityLine({ status: "ready" }))).toContain("ready  type a message");
-		expect(stripAnsi(formatTuiActivityLine({ status: "ready" }))).not.toContain("›");
+		).toContain("• Paused (/resume to continue) · 4 queued");
+		expect(stripAnsi(formatTuiActivityLine({ status: "ready", queuedCount: 4 }))).toBe("• Queued (4 waiting)");
+		expect(stripAnsi(formatTuiActivityLine({ status: "ready" }))).toBe("• Ready");
 	});
 
 	it("defines Ctrl+C as active cancel, idle clear, then consecutive-key exit arm", () => {
@@ -469,27 +641,27 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(resolveCtrlCAction("", false, true)).toBe("exit");
 	});
 
-	it("renders a compact transcript, queue, prompt, and measured workspace status", () => {
+	it("renders the target prompt band, answer flow, title, activity, and composer", () => {
 		const output = renderTuiFrame(state, 120, 34);
 		expect(output).toContain("3xhaustPi");
-		expect(output).toContain("3xhaust");
 		expect(output).toContain("로그인 오류를 조사해");
 		expect(output).not.toContain("진단 결과도 확인해");
-		expect(output).toContain("35K/400K (8.8%)");
-		expect(output).toContain("auto");
-		expect(output).toContain("openai-codex");
-		expect(output).toContain("gpt-5.6-terra:medium");
-		expect(output).toContain("tasks 1");
-		expect(visibleLines(output).at(-1) ?? "").not.toContain("…/project");
-		expect(visibleLines(output)[0]).not.toContain("ready");
+		expect(visibleLines(output)[0]).toBe("3xhaustPi: project (gpt-5.6-terra)");
+		expect(output).toContain("\u001b[48;5;238m");
+		expect(visibleLines(output)).toContain("• Working (esc to interrupt)");
+		expect(visibleLines(output).at(-1)).toContain("> 로그인 오류를 조사해");
+		expect(output).not.toContain("openai-codex");
+		expect(output).not.toContain("35K/400K");
+		expect(visibleLines(output).join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
 		expect(output).not.toMatch(/3xhaustPi Native|😺|🤖/u);
 	});
 
-	it("keeps the same direct transcript hierarchy in a narrow terminal", () => {
+	it("keeps prompt tint and unlabeled answer hierarchy in a narrow terminal", () => {
 		const output = renderTuiFrame(state, 56, 22);
 		expect(output).toContain("인증 콜백에서");
-		expect(output).toContain("8.8%");
-		expect(output).toContain("3xhaust");
+		expect(output).toContain("\u001b[48;5;238m");
+		expect(visibleLines(output).join("\n")).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
+		expect(visibleLines(output).at(-1)).toContain("> 로그인 오류를 조사해");
 		expect(output).not.toMatch(/not implemented|excluded|skipped|구현하지|제외/u);
 	});
 	it("bounds the transcript viewport and keeps newest chat content above fixed chrome", () => {
@@ -504,8 +676,8 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expectFrameWithin(output, 72, 24);
 		expect(output).toContain("  80 한국어 응답");
 		expect(output).not.toContain("  1 한국어 응답");
-		expect(output).toContain("/help");
-		expect(output).toContain("/exit");
+		expect(visibleLines(output).join("\n")).toContain("• Working");
+		expect(visibleLines(output).at(-1)).toContain(">");
 	});
 
 	it("keeps responsive CJK-safe chrome within 56, 72, and 120 columns", () => {
@@ -554,24 +726,24 @@ describe("Pi-native event-driven TUI renderer", () => {
 
 			// When
 			const rendered = output.join("\n");
-			const gutter = columns >= 96 ? "   " : "  ";
-			const assistantHeader = output.indexOf(`${gutter}3xhaust`);
+			const promptLine = output.findIndex((line) => line.includes("오래된 요청"));
+			const answerLine = output.findIndex((line) => line.includes("최신 응답"));
 			const olderBodyVisible = rendered.includes("오래된 요청");
 
 			// Then
 			expectFrameWithin(output.join("\n"), columns, rows);
-			expect(assistantHeader, `${columns}x${rows} must preserve the assistant header`).toBeGreaterThanOrEqual(0);
-			expect(
-				output.slice(assistantHeader + 1).some((line) => line.startsWith(`${gutter}  `)),
-				`${columns}x${rows} must preserve an assistant body row`,
-			).toBe(true);
-			if (olderBodyVisible) expect(rendered).toContain(`${gutter}You`);
+			expect(answerLine, `${columns}x${rows} must preserve the latest answer`).toBeGreaterThanOrEqual(0);
+			expect(output[answerLine]).toMatch(/^ {2}/u);
+			expect(rendered).not.toMatch(/^\s*(?:You|3xhaust)\s*$/gmu);
+			if (olderBodyVisible) expect(promptLine).toBeGreaterThanOrEqual(0);
 		}
 	});
 
-	it("shows an empty-composer affordance in the reusable status row", () => {
-		expect(stripAnsi(formatTuiStatusLine("ready", "", 0))).toContain("ready  type a message or /help");
-		expect(formatTuiStatusLine("running", "planning…", 1)).not.toContain("type a message");
+	it("keeps the status row quiet while the composer owns input affordance", () => {
+		expect(stripAnsi(formatTuiStatusLine("ready", "", 0))).toBe("• Ready");
+		expect(stripAnsi(formatTuiStatusLine("running", "planning…", 1))).toContain(
+			"• Working (planning… · esc to interrupt)",
+		);
 	});
 
 	it("renders slash-command help without splitting command tokens at 56 columns", () => {
@@ -649,7 +821,7 @@ describe("Pi-native event-driven TUI renderer", () => {
 		] as const) {
 			const closed = visibleLines(renderTuiFrame(state, columns, rows));
 			const open = visibleLines(renderTuiFrame(state, columns, rows, { autocompleteRows: 6 }));
-			for (const needle of ["3xhaustPi", "ready  type a message", "›", "gpt-5.6-terra"] as const) {
+			for (const needle of ["3xhaustPi", "• Working", "> 로그인 오류를 조사해"] as const) {
 				expect(open.findIndex((line) => line.includes(needle))).toBe(
 					closed.findIndex((line) => line.includes(needle)),
 				);
@@ -670,10 +842,11 @@ describe("Pi-native event-driven TUI renderer", () => {
 		const open = visibleLines(renderTuiFrame(overlayState, 72, 24, { autocompleteRows: 6 }));
 
 		// Then
-		expect(closed).toContain("    turn 16");
-		expect(open).not.toContain("    turn 16");
-		expect(open).toContain("    turn 20");
-		for (const needle of ["3xhaustPi", "ready  type a message", "›", "gpt-5.6-terra"] as const) {
+		const closedTurns = closed.filter((line) => line.includes("turn "));
+		const openTurns = open.filter((line) => line.includes("turn "));
+		expect(closedTurns.length).toBeGreaterThan(openTurns.length);
+		expect(open).toContain("  turn 20");
+		for (const needle of ["3xhaustPi", "• Working", "> 로그인 오류를 조사해"] as const) {
 			expect(open.findIndex((line) => line.includes(needle))).toBe(
 				closed.findIndex((line) => line.includes(needle)),
 			);

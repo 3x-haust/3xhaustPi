@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { DocumentId } from "@3xhaust/semantic-contract";
-import { resolveProjectDataDirectory } from "./identity.ts";
+import { ACTIVE_DATA_DIRECTORY, resolveProjectDataDirectory } from "./identity.ts";
 
 const TEXT_EXTENSIONS = new Set([
 	".c",
@@ -93,7 +93,7 @@ function listSkillFiles(projectRoot: string): readonly string[] {
 	if (!existsSync(skillsRoot)) return [];
 	return readdirSync(skillsRoot, { withFileTypes: true })
 		.filter((entry) => entry.isDirectory())
-		.map((entry) => `.3xhaustpi/skills/${entry.name}/SKILL.md`)
+		.map((entry) => `${ACTIVE_DATA_DIRECTORY}/skills/${entry.name}/SKILL.md`)
 		.filter((relativePath) => existsSync(join(projectRoot, relativePath)))
 		.sort();
 }
@@ -168,8 +168,8 @@ export function createProjectSnapshot(projectRoot: string, objective: string): P
 			? []
 			: [
 					{
-						relativePath: `.3xhaustpi/skills/${skillId}/SKILL.md`,
-						content: `<!-- X3HAUSTPI_NEW_FILE: .3xhaustpi/skills/${skillId}/SKILL.md -->`,
+						relativePath: `${ACTIVE_DATA_DIRECTORY}/skills/${skillId}/SKILL.md`,
+						content: `<!-- X3HAUSTPI_NEW_FILE: ${ACTIVE_DATA_DIRECTORY}/skills/${skillId}/SKILL.md -->`,
 					},
 				];
 	const newFileSlots =

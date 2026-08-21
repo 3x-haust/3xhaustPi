@@ -9,7 +9,7 @@ Turn a repeated workflow into one focused 3xhaustPi skill.
 
 1. Choose a lowercase skill id using letters, numbers, dots, underscores, or hyphens.
 2. Create the project template with `3xhaustpi skill create <id>`.
-3. Edit `.3xhaustpi/skills/<id>/SKILL.md`.
+3. Edit `.3xhaust/skills/<id>/SKILL.md`.
 4. Keep frontmatter limited to:
    - `name`: a short display name
    - `description`: specific trigger conditions

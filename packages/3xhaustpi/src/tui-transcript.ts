@@ -1,7 +1,27 @@
-import { ASSISTANT_DISPLAY_NAME } from "./product-identity.ts";
-import { accent, cellWidth, dim, failure, muted, stripAnsi, text, warning } from "./tui-text.ts";
+import {
+	cellWidth,
+	dim,
+	emphasis,
+	failure,
+	italic,
+	muted,
+	promptSurfaceLine,
+	sanitizeTerminalText,
+	stripAnsi,
+	text,
+	warning,
+} from "./tui-text.ts";
 
-export type TuiTranscriptRole = "you" | "threeXhaust" | "tool" | "agent" | "system" | "error" | "approval";
+export type TuiTranscriptRole =
+	| "you"
+	| "threeXhaust"
+	| "thought"
+	| "metrics"
+	| "tool"
+	| "agent"
+	| "system"
+	| "error"
+	| "approval";
 
 export interface TuiTranscriptTemplate {
 	readonly role: TuiTranscriptRole;
@@ -14,22 +34,24 @@ export function formatSubmittedPromptTurn(objective: string, inserted: boolean):
 }
 
 export function formatTranscriptEntry(value: string): TuiTranscriptTemplate {
-	const visible = stripAnsi(value).trimStart();
+	const visible = stripAnsi(sanitizeTerminalText(value)).trimStart();
 	const without = (pattern: RegExp) => visible.replace(pattern, "").trimStart();
 	if (/^(You|User|사용자)\b/u.test(visible)) {
-		return { role: "you", label: text("You"), content: without(/^(You|User|사용자)\s*/u) };
+		return { role: "you", label: "", content: without(/^(You|User|사용자)\s*/u) };
 	}
 	const assistantPrefix = /^(3xhaustPi|3xhaustpi|3xhaust|Assistant)\b/u;
 	if (assistantPrefix.test(visible)) {
 		return {
 			role: "threeXhaust",
-			label: accent(ASSISTANT_DISPLAY_NAME),
+			label: "",
 			content: without(/^(3xhaustPi|3xhaustpi|3xhaust|Assistant)\s*/u),
 		};
 	}
 	if (/^assistant\b/u.test(visible)) {
-		return { role: "threeXhaust", label: accent(ASSISTANT_DISPLAY_NAME), content: without(/^assistant\s*/u) };
+		return { role: "threeXhaust", label: "", content: without(/^assistant\s*/u) };
 	}
+	if (/^Thought:/u.test(visible)) return { role: "thought", label: "", content: visible };
+	if (/^Stats:/u.test(visible)) return { role: "metrics", label: "", content: without(/^Stats:\s*/u) };
 	if (
 		/^(Patch ready|Press y|Computer action ready|✓ Patch approved|✓ Computer action approved|Patch rejected)\b/u.test(
 			visible,
@@ -78,16 +100,42 @@ function wrapPlainLine(value: string, columns: number): string[] {
 
 function messageCard(value: string, columns: number): string[] {
 	const { role, label, content } = formatTranscriptEntry(value);
-	const source = content || stripAnsi(value);
-	const gutter = columns >= 96 ? "   " : "  ";
-	if (role === "you" || role === "threeXhaust") {
-		const bodyIndent = `${gutter}  `;
+	const source = content || stripAnsi(sanitizeTerminalText(value));
+	const gutter = "  ";
+	if (role === "you") {
+		const bodyIndent = "  ";
+		const contentWidth = Math.max(1, columns - cellWidth(bodyIndent) * 2);
+		const rows = source
+			.split("\n")
+			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
+			.map((line) => promptSurfaceLine(`${bodyIndent}${line}`, columns));
+		if (columns >= 80) return [promptSurfaceLine("", columns), ...rows, promptSurfaceLine("", columns)];
+		if (columns >= 40) return [...rows, promptSurfaceLine("", columns)];
+		return rows;
+	}
+	if (role === "threeXhaust") {
+		const bodyIndent = gutter;
 		const contentWidth = Math.max(1, Math.min(96, columns - cellWidth(bodyIndent)));
 		const rows = source
 			.split("\n")
 			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
-			.map((line) => `${bodyIndent}${line}`);
-		return [`${gutter}${label}`, ...rows, ""];
+			.map((line) => text(`${bodyIndent}${line}`));
+		return [...rows, ""];
+	}
+	if (role === "thought") {
+		const contentWidth = Math.max(1, columns - cellWidth(gutter));
+		return source
+			.split("\n")
+			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
+			.map((line) => muted(italic(`${gutter}${line}`)));
+	}
+	if (role === "metrics") {
+		const contentWidth = Math.max(1, columns - cellWidth(gutter));
+		const rows = source
+			.split("\n")
+			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
+			.map((line) => dim(`${gutter}${line}`));
+		return [...rows, ""];
 	}
 	if (role === "system") {
 		const prefix = `${gutter}• `;
@@ -97,11 +145,15 @@ function messageCard(value: string, columns: number): string[] {
 		return rows.map((line, index) => dim(`${index === 0 ? prefix : continuation}${line}`));
 	}
 	if (role === "agent" || role === "tool") {
-		const prefix = `${gutter}  ${dim(role === "agent" ? "├" : "└")} `;
-		const continuation = `${gutter}    `;
-		const contentWidth = Math.max(1, columns - cellWidth(prefix));
+		const prefix = gutter;
+		const continuation = gutter;
+		const contentWidth = Math.max(1, columns - cellWidth(gutter));
 		const rows = source.split("\n").flatMap((physical) => wrapPlainLine(physical, contentWidth));
-		return rows.map((line, index) => `${index === 0 ? prefix : continuation}${line}`);
+		return rows.map((line, index) =>
+			role === "agent"
+				? muted(emphasis(`${index === 0 ? prefix : continuation}${line}`))
+				: muted(`${index === 0 ? prefix : continuation}${line}`),
+		);
 	}
 	const prefix = `${gutter}${label} ${dim("│")} `;
 	const continuation = `${gutter}${" ".repeat(cellWidth(stripAnsi(label)))} ${dim("│")} `;
@@ -131,26 +183,29 @@ function transcriptCards(entries: readonly string[], columns: number): string[][
 			owner.push(...card, "");
 			continue;
 		}
+		if (template.role === "thought" && pendingActivity.length > 0) {
+			cards.push(...pendingActivity);
+			pendingActivity = [];
+		}
+		if (template.role === "metrics" && activeAssistantCard !== undefined) {
+			const owner = cards[activeAssistantCard];
+			if (!owner) continue;
+			if (owner.at(-1) === "") owner.pop();
+			owner.push("", ...card);
+			continue;
+		}
 		if (template.role === "you" && pendingActivity.length > 0) {
 			cards.push(...pendingActivity);
 			pendingActivity = [];
 		}
 		const renderedCard =
-			template.role === "threeXhaust" && pendingActivity.length > 0
-				? [
-						card[0] ?? "",
-						...pendingActivity.flat(),
-						...card.slice(1, card.at(-1) === "" ? -1 : undefined),
-						...(card.at(-1) === "" ? [""] : []),
-					]
-				: card;
+			template.role === "threeXhaust" && pendingActivity.length > 0 ? [...pendingActivity.flat(), ...card] : card;
 		if (template.role === "threeXhaust") pendingActivity = [];
 		cards.push(renderedCard);
 		activeAssistantCard = template.role === "threeXhaust" ? cards.length - 1 : undefined;
 	}
 	if (pendingActivity.length > 0) {
-		const gutter = columns >= 96 ? "   " : "  ";
-		cards.push([`${gutter}${accent(ASSISTANT_DISPLAY_NAME)}`, ...pendingActivity.flat(), ""]);
+		cards.push([...pendingActivity.flat(), ""]);
 	}
 	return cards;
 }
@@ -168,13 +223,18 @@ export function fitTranscriptCards(entries: readonly string[], columns: number, 
 			continue;
 		}
 		if (visibleCards.length === 0) {
-			const first = card[0] ?? "";
 			const cardHasTrailingGap = card.at(-1) === "";
 			const hasTrailingGap = cardHasTrailingGap && remaining > 2;
-			const body = card.slice(1, cardHasTrailingGap ? -1 : undefined);
+			const contentEnd = cardHasTrailingGap ? card.length - 1 : card.length;
+			const anchorIndex = card.findIndex((line, candidateIndex) => {
+				return candidateIndex < contentEnd && stripAnsi(line).trim().length > 0;
+			});
+			const resolvedAnchorIndex = anchorIndex === -1 ? 0 : anchorIndex;
+			const anchor = card[resolvedAnchorIndex] ?? "";
+			const body = card.slice(resolvedAnchorIndex + 1, contentEnd);
 			const bodyBudget = Math.max(0, remaining - 1 - (hasTrailingGap ? 1 : 0));
 			const visibleBody = bodyBudget > 0 ? body.slice(-bodyBudget) : [];
-			visibleCards.unshift([first, ...visibleBody, ...(hasTrailingGap ? [""] : [])]);
+			visibleCards.unshift([anchor, ...visibleBody, ...(hasTrailingGap ? [""] : [])]);
 			remaining = 0;
 		}
 		break;

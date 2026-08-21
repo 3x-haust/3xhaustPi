@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import {
@@ -32,6 +31,7 @@ import {
 	failure,
 	frameLine,
 	muted,
+	sanitizeTerminalText,
 	stripAnsi,
 	success,
 	text,
@@ -39,7 +39,7 @@ import {
 } from "./tui-text.ts";
 import { fitTranscriptCards, formatSubmittedPromptTurn } from "./tui-transcript.ts";
 
-export { cellWidth, stripAnsi } from "./tui-text.ts";
+export { cellWidth, sanitizeTerminalText, stripAnsi } from "./tui-text.ts";
 export type { TuiTranscriptRole, TuiTranscriptTemplate } from "./tui-transcript.ts";
 export { formatSubmittedPromptTurn, formatTranscriptEntry } from "./tui-transcript.ts";
 
@@ -70,10 +70,10 @@ export interface TuiLayoutContract {
 	readonly rows: number;
 	readonly mode: TuiDensityMode;
 	readonly identityRows: 1;
-	readonly contextRows: 0 | 1;
+	readonly contextRows: 0;
 	readonly activityRows: 1;
-	readonly composerRows: 3;
-	readonly footerRows: 1;
+	readonly composerRows: 2;
+	readonly footerRows: 0;
 	readonly autocompleteRows: number;
 	readonly chromeRows: number;
 	readonly transcriptRows: number;
@@ -98,10 +98,9 @@ export function layoutTuiFrame(
 	const mode = densityMode(width);
 	const requestedAutocompleteRows = Math.max(0, Math.floor(options.autocompleteRows ?? 0));
 	const boundedAutocompleteRows = Math.min(requestedAutocompleteRows, Math.floor(height * 0.4));
-	const essentialChromeRows = 6;
-	const wantsContext = width >= 60 && mode !== "degraded" && mode !== "minimal";
-	const contextRows = wantsContext && height - essentialChromeRows - boundedAutocompleteRows > 1 ? 1 : 0;
-	const chromeRows = essentialChromeRows + contextRows;
+	const essentialChromeRows = 4;
+	const contextRows = 0;
+	const chromeRows = essentialChromeRows;
 	const autocompleteRows = Math.min(boundedAutocompleteRows, Math.max(0, height - chromeRows - 1));
 	const transcriptRows = Math.max(1, height - chromeRows - autocompleteRows);
 	return {
@@ -111,8 +110,8 @@ export function layoutTuiFrame(
 		identityRows: 1,
 		contextRows,
 		activityRows: 1,
-		composerRows: 3,
-		footerRows: 1,
+		composerRows: 2,
+		footerRows: 0,
 		autocompleteRows,
 		chromeRows,
 		transcriptRows,
@@ -140,6 +139,29 @@ function compactTokens(value: number): string {
 	if (value < 1_000) return String(value);
 	const thousands = value / 1_000;
 	return `${thousands >= 100 || Number.isInteger(thousands) ? thousands.toFixed(0) : thousands.toFixed(1)}K`;
+}
+
+export interface TuiResponseMetrics {
+	readonly input: number | null;
+	readonly output: number | null;
+	readonly cacheRead: number | null;
+	readonly durationMs: number;
+}
+
+function seconds(value: number): string {
+	return `${(Math.max(0, value) / 1_000).toFixed(1)}s`;
+}
+
+export function formatResponseMetrics(metrics: TuiResponseMetrics): string {
+	const parts: string[] = [];
+	if (metrics.output !== null && metrics.durationMs > 0) {
+		parts.push(`TPS ${(metrics.output / (metrics.durationMs / 1_000)).toFixed(1)} tok/s`);
+	}
+	if (metrics.input !== null && metrics.input > 0 && metrics.cacheRead !== null) {
+		parts.push(`Cache hit ${((Math.max(0, metrics.cacheRead) / metrics.input) * 100).toFixed(1)}%`);
+	}
+	parts.push(seconds(metrics.durationMs));
+	return `Stats: ${parts.join(" · ")}`;
 }
 
 export interface TuiCommand {
@@ -260,54 +282,22 @@ export function formatStatusFooter(state: TuiViewState, columns = 120): string {
 	return ellipsizeCells(joinSegments(promoted), columns);
 }
 
-function inspectGitStatus(projectRoot: string): TuiViewState["gitStatus"] {
-	const result = spawnSync("git", ["status", "--porcelain=v1"], {
-		cwd: projectRoot,
-		encoding: "utf8",
-		timeout: 3_000,
-		maxBuffer: 262_144,
-	});
-	if (result.status !== 0) return "unavailable";
-	return result.stdout.trim() ? "dirty" : "clean";
-}
-
 /**
  * Static renderer used by tests and evidence conversion. The live TUI below uses
  * Pi's differential renderer with the same bounded transcript budgeting.
  */
 function identityRail(state: TuiViewState, layout: TuiLayoutContract): string {
-	const project = basename(state.projectRoot);
-	const parts = [text(PRODUCT_DISPLAY_NAME)];
+	const project = sanitizeTerminalText(basename(state.projectRoot));
+	const parts = [PRODUCT_DISPLAY_NAME];
 	if (project !== PRODUCT_MACHINE_NAME && layout.mode !== "degraded" && layout.mode !== "minimal")
-		parts.push(text(project));
-	return frameLine(parts.join("  "), layout.columns);
-}
-
-function contextRail(layout: TuiLayoutContract): string {
-	const hint =
-		layout.mode === "compact" ? "/help  /model  /exit" : "/help commands  /model list|select  /resume  /exit";
-	return frameLine(muted(hint), layout.columns);
-}
-
-class ContextRail implements Component {
-	private readonly rowsProvider: () => number;
-
-	constructor(rowsProvider: () => number = () => process.stdout.rows || 36) {
-		this.rowsProvider = rowsProvider;
-	}
-
-	render(width: number): string[] {
-		const layout = layoutTuiFrame(width, this.rowsProvider());
-		return layout.contextRows ? [contextRail(layout)] : [];
-	}
-
-	invalidate(): void {}
+		parts.push(`: ${project}`);
+	if (layout.mode === "full" || layout.mode === "wide") parts.push(` (${sanitizeTerminalText(state.model)})`);
+	return frameLine(muted(parts.join("")), layout.columns);
 }
 
 function composerRail(state: TuiViewState, layout: TuiLayoutContract): readonly string[] {
-	const promptText = state.input ? state.input : muted("Ask anything, or type /help");
-	const rule = dim("─".repeat(layout.columns));
-	return [rule, frameLine(`${accent("›")} ${promptText}`, layout.columns), rule];
+	const rule = accent("─".repeat(layout.columns));
+	return [rule, frameLine(`${accent(">")} ${state.input}`, layout.columns)];
 }
 
 export function transcriptViewportRows(
@@ -352,7 +342,6 @@ export function renderTuiFrame(
 	options: { readonly autocompleteRows?: number } = {},
 ): string {
 	const layout = layoutTuiFrame(columns, rows, options);
-	const footer = frameLine(formatStatusFooter(state, layout.columns), layout.columns);
 	const activity = frameLine(
 		formatTuiActivityLine({
 			status: state.status,
@@ -371,12 +360,10 @@ export function renderTuiFrame(
 	];
 	const lines = [
 		identityRail(state, layout),
-		...(layout.contextRows ? [contextRail(layout)] : []),
 		...paddedTranscript,
 		...Array.from({ length: layout.autocompleteRows }, () => ""),
 		activity,
 		...composerRail(state, layout),
-		footer,
 	];
 	return lines
 		.slice(0, layout.rows)
@@ -407,26 +394,30 @@ export interface TuiActivityState {
 }
 
 function activityDetail(value: string, columns: number): string {
-	return ellipsizeCells(value.replace(/\s+/gu, " ").trim(), Math.max(1, columns));
+	return ellipsizeCells(sanitizeTerminalText(value).replace(/\s+/gu, " ").trim(), Math.max(1, columns));
 }
 
 export function formatTuiActivityLine(state: TuiActivityState, columns = 120): string {
 	const queuedCount = state.queuedCount ?? 0;
 	const activeCount = state.activeCount ?? 0;
 	const detail = state.detail ? activityDetail(state.detail, Math.max(8, columns - 14)) : "";
+	const bullet = dim("•");
 	if (state.status === "awaiting-approval") {
-		return `${warning("review")}  ${detail || "approval required"}`;
+		return `${bullet} ${warning("Review")} ${dim(`(${detail || "approval required"})`)}`;
 	}
-	if (state.canceled) return `${warning("canceled")}  ready`;
-	if (state.status === "error") return `${failure("failed")}  ${detail || "ready"}`;
-	if (state.status === "running" && detail) return `${accent("working")}  ${detail}`;
-	if (activeCount > 0) return `${accent("working")}  ${activeCount} active`;
+	if (state.canceled) return `${bullet} ${warning("Canceled")}`;
+	if (state.status === "error") return `${bullet} ${failure("Failed")} ${dim(`(${detail || "ready"})`)}`;
+	if (state.status === "running" || activeCount > 0) {
+		const target = detail || (activeCount > 1 ? `${activeCount} active` : "");
+		const suffix = target ? `${target} ${dim("·")} esc to interrupt` : "esc to interrupt";
+		return `${bullet} ${text("Working")} ${dim(`(${suffix})`)}`;
+	}
 	if (state.resumable) {
 		const queue = queuedCount > 0 ? ` ${dim("·")} ${queuedCount} queued` : "";
-		return `${warning("paused")}  /resume to continue${queue}`;
+		return `${bullet} ${warning("Paused")} ${dim("(/resume to continue)")}${queue}`;
 	}
-	if (queuedCount > 0) return `${muted("queued")}  ${queuedCount} waiting`;
-	return `${accent("ready")}  type a message or /help`;
+	if (queuedCount > 0) return `${bullet} ${muted("Queued")} ${dim(`(${queuedCount} waiting)`)}`;
+	return `${bullet} ${muted("Ready")}`;
 }
 
 export function formatTuiStatusLine(
@@ -506,7 +497,6 @@ export async function runTui(input: {
 	const provider = input.provider ?? DEFAULT_PROVIDER;
 	let model = input.model ?? DEFAULT_MODEL;
 	const thinkingLevel = input.thinkingLevel;
-	const contextLimit = input.contextLimit ?? 400_000;
 	const desktopHost = input.desktopHost ?? new DesktopAccessibilityHost();
 	let projectRoot = input.projectRoot;
 	const database = new ThreeXhaustState(input.statePath);
@@ -523,12 +513,12 @@ export async function runTui(input: {
 	const editor = new Editor(ui, editorTheme(), {
 		paddingX: 1,
 		autocompletePresentation: "overlay",
-		placeholder: muted("Ask anything, or type /help"),
-		promptPrefix: `${accent("›")} `,
+		promptPrefix: `${accent(">")} `,
+		bottomBorder: false,
+		maxVisibleLines: 1,
 		submitSlashArgumentCompletions: true,
 	});
 	const transcript = new TranscriptViewport(transcriptEntries, () => process.stdout.rows || 36);
-	const footer = new Text("", 0, 0);
 	let queuedRequests: readonly TuiRequest[] = database
 		.listTuiRequests(projectRoot)
 		.filter((request) => request.status === "queued");
@@ -543,8 +533,7 @@ export async function runTui(input: {
 	let desktopObservation: DesktopAccessibilityObservation | undefined;
 	let activeTuiRequestId: string | undefined;
 	let activeTuiRequestHandedOff = false;
-	let contextTokens = 0;
-	let gitStatus = inspectGitStatus(projectRoot);
+	let pendingResponseMetrics: string | undefined;
 	let active = true;
 	let ctrlCExitArmed = false;
 	let canceledActive = false;
@@ -575,11 +564,9 @@ export async function runTui(input: {
 	};
 	updateHeader();
 	ui.addChild(header);
-	ui.addChild(new ContextRail());
 	ui.addChild(transcript);
 	ui.addChild(status);
 	ui.addChild(editor);
-	ui.addChild(footer);
 
 	const activeTaskCount = () => (activeExecution ? 1 : 0) + (desktopOperation ? 1 : 0);
 	const hasResumableChat = () =>
@@ -594,27 +581,6 @@ export async function runTui(input: {
 				resumable: hasResumableChat(),
 				canceled: canceledActive,
 			}),
-		);
-		footer.setText(
-			formatStatusFooter(
-				{
-					projectRoot,
-					provider,
-					model,
-					thinkingLevel,
-					contextTokens,
-					contextLimit,
-					gitStatus,
-					activeTasks: activeTaskCount(),
-					providerConfigured,
-					status: phase,
-					input: editor.getText(),
-					messages: [],
-					queuedRequests: queuedRequests.map(({ objective }) => objective),
-					workspace,
-				},
-				process.stdout.columns || 120,
-			),
 		);
 		updateHeader();
 		ui.requestRender();
@@ -648,7 +614,8 @@ export async function runTui(input: {
 				refreshQueue();
 			}
 		} else if (event.type === "model.completed") {
-			contextTokens = event.usage.input ?? contextTokens;
+			appendText(`Thought: ${seconds(event.durationMs)}`);
+			pendingResponseMetrics = formatResponseMetrics({ ...event.usage, durationMs: event.durationMs });
 		} else if (event.type === "capability.started") {
 			updateChrome(`${event.capability}…`);
 		} else if (event.type === "capability.completed") {
@@ -670,6 +637,8 @@ export async function runTui(input: {
 			);
 		} else if (event.type === "assistant.message") {
 			appendText(`${ASSISTANT_DISPLAY_NAME} ${event.text}`);
+			if (pendingResponseMetrics) appendText(pendingResponseMetrics);
+			pendingResponseMetrics = undefined;
 		}
 	};
 	const requestApproval = (_proposal: CodingTaskPatchProposal): Promise<boolean> =>
@@ -687,6 +656,7 @@ export async function runTui(input: {
 		canceledActive = false;
 		activeTuiRequestId = request?.id;
 		activeTuiRequestHandedOff = false;
+		pendingResponseMetrics = undefined;
 		activeController = new AbortController();
 		if (resume) appendUser(`/resume ${resumeSessionId === "" ? "" : resumeSessionId.slice(-8)}`.trim());
 		updateChrome(resume ? "recovering…" : "planning…");
@@ -744,6 +714,7 @@ export async function runTui(input: {
 		activeExecution = execution;
 		void execution.finally(() => {
 			if (activeExecution === execution) activeExecution = undefined;
+			updateChrome();
 			if (!active) finish();
 			else drainQueue();
 		});
@@ -754,6 +725,7 @@ export async function runTui(input: {
 		activeExecution = execution;
 		void execution.finally(() => {
 			if (activeExecution === execution) activeExecution = undefined;
+			updateChrome();
 			if (!active) finish();
 			else drainQueue();
 		});
@@ -1182,7 +1154,6 @@ export async function runTui(input: {
 					return;
 				}
 				projectRoot = project.path;
-				gitStatus = inspectGitStatus(projectRoot);
 				refreshWorkspace();
 				refreshQueue();
 				updateHeader();

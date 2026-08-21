@@ -32,7 +32,7 @@ describe("3xhaustpi harness resources", () => {
 		for (const scope of ["builtin", "user", "project"]) {
 			const directory =
 				scope === "project"
-					? join(input.projectRoot, ".3xhaustpi", "skills", "release")
+					? join(input.projectRoot, ".3xhaust", "skills", "release")
 					: join(root, scope, "skills", "release");
 			mkdirSync(directory, { recursive: true });
 			writeFileSync(
@@ -58,7 +58,7 @@ describe("3xhaustpi harness resources", () => {
 		const input = options(root);
 		const command = process.execPath;
 		mkdirSync(input.userRoot!, { recursive: true });
-		mkdirSync(join(input.projectRoot, ".3xhaustpi"), { recursive: true });
+		mkdirSync(join(input.projectRoot, ".3xhaust"), { recursive: true });
 		writeFileSync(
 			join(input.userRoot!, "hooks.json"),
 			JSON.stringify({
@@ -67,7 +67,7 @@ describe("3xhaustpi harness resources", () => {
 			}),
 		);
 		writeFileSync(
-			join(input.projectRoot, ".3xhaustpi", "hooks.json"),
+			join(input.projectRoot, ".3xhaust", "hooks.json"),
 			JSON.stringify({
 				schemaVersion: 1,
 				hooks: [{ id: "project-notify", event: "session.failed", command, args: ["notify.mjs"] }],
@@ -123,7 +123,7 @@ describe("3xhaustpi harness resources", () => {
 			scope: "project",
 		});
 
-		expect(created.path).toBe(join(projectRoot, ".3xhaustpi", "skills", "release-helper", "SKILL.md"));
+		expect(created.path).toBe(join(projectRoot, ".3xhaust", "skills", "release-helper", "SKILL.md"));
 		expect(created.content).toContain("name: release-helper");
 		expect(created.content).toContain("Describe when 3xhaustPi should load this skill.");
 		expect(() => createSkillTemplate({ projectRoot, name: "release-helper", scope: "project" })).toThrow(

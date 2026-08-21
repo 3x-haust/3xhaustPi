@@ -9,8 +9,8 @@ made of boxes nor a decorative chatbot.
 - Product identity: `3xhaustPi`
 - Voice: concise, direct, operational
 - Signature: a cool blue-violet accent used sparingly for focus and active work
-- Hierarchy: text luminance first, semantic color second, separators last
-- Shape language: rules, rails, and compact cells; no ornamental box soup
+- Hierarchy: prompt surface first, text luminance second, semantic color last
+- Shape language: full-width prompt bands, open prose, and one composer rule
 - Density: transcript-first with progressive disclosure at narrow widths
 
 ## 2. Color
@@ -24,6 +24,7 @@ made of boxes nor a decorative chatbot.
 | `text-secondary` | 250 | metadata that remains readable |
 | `text-muted` | 245 | secondary hints and inactive segments |
 | `text-ghost` | 239 | separators and lowest-priority structure |
+| `prompt-surface` | 238 | full-width submitted user prompt band |
 | `success` | 114 | completed state |
 | `warning` | 214 | approval and paused state |
 | `failure` | 203 | failed state |
@@ -86,25 +87,25 @@ One terminal cell horizontally and one terminal row vertically.
 
 The root uses one vertical shell:
 
-1. **Identity rail:** fixed, one row.
-2. **Context rail:** optional, one row in roomy modes.
-3. **Transcript:** owns all remaining vertical space and scrolls/reflows.
-4. **Activity/composer:** fixed; autocomplete reserves its own bounded rows.
-5. **Status rail:** fixed, one row with width-prioritized segments.
+1. **Context title:** fixed, one quiet row.
+2. **Transcript:** owns all remaining vertical space and scrolls/reflows.
+3. **Activity:** fixed, one row.
+4. **Composer:** fixed, one rule plus the `>` input row; autocomplete reserves
+   its own bounded rows.
 
 ### Responsive Modes
 
 | Mode | Width | Policy |
 | --- | ---: | --- |
-| `degraded` | `< 40` or `< 10 rows` | bounded identity, composer, status, and a terminal-size notice |
-| `minimal` | `40–55` | identity + activity, no persistent hints, compact footer |
-| `compact` | `56–79` | project, model, context percent, activity; short hint |
-| `full` | `80–119` | provider/model, context, git, tasks, command hint |
-| `wide` | `>= 120` | full status segments and richer activity metadata |
+| `degraded` | `< 40` or `< 10 rows` | bounded title, transcript, activity, and composer |
+| `minimal` | `40–55` | one-row prompt bands, unlabeled answer, activity |
+| `compact` | `56–79` | tinted prompt bands, answer flow, activity |
+| `full` | `80–119` | wider answer measure and response metrics |
+| `wide` | `>= 120` | three-row prompt bands and complete response metrics |
 
 Height is also a first-class constraint:
 
-- Optional context/help rows collapse before transcript, composer, or status.
+- Optional response metadata collapses before transcript, activity, or composer.
 - Autocomplete rows are subtracted from transcript budget.
 - Physical terminal width and height are hard limits; no synthetic minimum may
   emit outside them.
@@ -118,8 +119,7 @@ Height is also a first-class constraint:
 ### Rules
 
 - The transcript is the sole vertical scroll owner.
-- Header, composer, active state, and status remain visible during interaction.
-- Status segments are independent items with explicit priority.
+- Context title, composer, and active state remain visible during interaction.
 - Empty space is intentional breathing room, not filled with permanent panels.
 - A focused picker is bounded to at most 40% of terminal height.
 
@@ -138,38 +138,17 @@ rows, editor rows, and overlay rows, it returns:
 No renderer may invent a separate width floor, height floor, footer candidate,
 or transcript budget.
 
-### Responsive Segment Table
+### Responsive Surface Table
 
-| Segment | Home | Priority | Ideal | Compact | Minimum / hide rule |
-| --- | --- | ---: | --- | --- | --- |
-| product | identity | 100 | `3xhaustPi` | `3xhaustPi` | never hide |
-| workspace | identity | 90 | project basename | clipped from left | hide only in degraded mode |
-| activity | activity | 100 | symbol + verb + target | symbol + verb | never hide while non-ready |
-| approval keys | activity | 100 | `y apply · n reject` | `y/n` | never hide during review |
-| model | status | 95 | provider/model + thinking | model | clip model tail only after provider hides |
-| context | status | 85 | used/limit + percent | percent | hide when unavailable or below 40 columns |
-| git | status | 65 | branch/status | status glyph | hide before model/context |
-| tasks/queue | status | 60 | named counts | combined count | hide when both zero |
-| provider health | status | 55 | provider + health | health glyph | hide before model |
-| shortcuts | context | 20 | four commands | `/help · /model` | hide before wrapping |
-
-Segments resolve by priority and measured cell width. A lower-priority segment
-disappears before a higher-priority segment truncates.
-
-Resolution algorithm:
-
-1. Measure the physical row budget including three-cell separators (` · `).
-2. Sort candidate segments by descending priority.
-3. Greedily admit each segment in its compact form only when it fits with its
-   separator; a lower-priority segment is never admitted while a higher-priority
-   candidate is missing.
-4. Promote admitted segments from compact to ideal in descending priority while
-   cells remain.
-5. If the highest-priority model compact form still does not fit, render one
-   atomic middle-ellipsized token with at least four visible cells. Pickers and
-   command output always show the complete token.
-6. Never leave a leading/trailing separator and never budget ANSI bytes as
-   visible cells.
+| Surface | Wide/full | Compact | Minimal/degraded |
+| --- | --- | --- | --- |
+| title | product, project, model | product and project | product |
+| user prompt | empty tint row, content, empty tint row | content plus one tint row | content row only |
+| thought | duration and work summary | duration | hide before answer |
+| answer | readable capped measure | terminal measure | terminal measure |
+| metrics | throughput, cache, duration | cache and duration | duration |
+| activity | state, target, interrupt key | state and target | state |
+| composer | top rule plus `>` input | same | same |
 
 ## 5. Components
 
@@ -181,71 +160,70 @@ Resolution algorithm:
 - Minimal: `3xhaustPi`
 - Model and run state never repeat here.
 
-### Context Rail
-
-- Optional one-row shortcut/hint surface.
-- Shows only high-frequency actions: `/help`, `/model`, `/resume`, `/exit`.
-- Hidden before it wraps or competes with transcript space.
-
 ### Transcript Feed
 
-- Semantic roles: `you`, `threeXhaust`, `tool`, `agent`, `system`.
-- User and assistant messages are unmistakable conversation turns: a standalone
-  speaker header, an indented prose body, and one blank row separating turns.
-  They never share the compact execution-log row template.
-- User and assistant prose owns the widest measure in the transcript. Repeated
-  side rails are forbidden because they make wrapped conversation read as a
-  diagnostic table.
+- Semantic roles: `prompt`, `thought`, `work`, `answer`, `metrics`, `system`.
+- Submitted prompts are full-width `prompt-surface` bands. The surface, not a
+  speaker name, identifies the user role. `You`, `User`, `3xhaust`, and generic
+  assistant labels never render.
+- Wide prompt bands use an empty surface row above and below the prompt.
+  Compact bands retain the same tint while dropping empty rows before content.
+- Assistant output is open prose on the terminal background. Its sequence is
+  muted italic thought timing, emphasized work summary when available, bright
+  answer prose, then subdued response metrics.
+- Answer prose owns the widest readable measure. Repeated labels, side rails,
+  and chat bubbles are forbidden.
 - System messages are quieter than conversation and have no repeated `system`
   label. A compact notice marker may introduce durable notices, but startup,
   restored-queue counts, resumable-session state, and transient progress belong
   to activity/status rather than the chat transcript.
-- Consecutive tool events group under a tool/capability identity.
-- Completed tool rows show state, name, duration, and summary.
+- Completed work rows show state, capability, duration, and summary without an
+  assistant header or execution-tree rail.
 - Raw output emitted into the transcript is bounded and exposes omitted-line
   counts. Interactive expansion is not part of this redesign.
 - Newest content remains visible; persisted order stays deterministic.
 
-#### Execution Spine
+#### Response Flow
 
-3xhaustPi's distinctive grammar is a restrained execution spine connecting one
-assistant turn to its host work:
+3xhaustPi's transcript grammar is:
 
 ```text
-3xhaust │ I’ll inspect the failing path.
-       ├ tool  read src/auth.ts                 running
-       ├ tool  test auth.test.ts              ✓ 184 ms
-       ├ agent luna  login flow               ◇ working
-       └ result  Root cause confirmed
+[full-width tinted user prompt]
+
+Thought: 1.2s
+Planning the response
+
+Bright assistant answer with no speaker label.
+
+TPS 15.8 tok/s · Cache hit 0.0% · 4.5s
 ```
 
-- `│`, `├`, and `└` encode ownership without drawing boxes.
-- Parallel siblings share the same spine level.
-- Duration aligns after the state when space permits and moves to the next
-  metadata row only in wide mode.
-- Durable results enter the transcript; transient progress remains in activity.
+- Prompt tint is the only large-area surface in the transcript.
+- Thought and metrics are visibly quieter than the answer.
+- Durable work results may appear between thought and answer; transient progress
+  stays in the activity row.
 
 #### Row Templates
 
 | Event | Durable transcript form |
 | --- | --- |
-| user message | standalone `You` header followed by indented prose |
-| assistant streaming | standalone `3xhaust` header followed by partial prose updated in place |
-| assistant complete | standalone `3xhaust` header followed by indented prose |
-| tool pending/running | child spine row with explicit verb and `pending`/`running` |
-| tool success | child spine row with `✓`, duration, concise summary |
-| tool failure | child spine row with `×`, duration, error summary |
-| tool cancelled | child spine row with `– cancelled` |
+| user message | full-width tinted prompt band, no speaker label |
+| model completed | muted italic `Thought: <duration>` |
+| assistant streaming | bright unlabeled partial prose updated in place |
+| assistant complete | bright unlabeled prose followed by metrics |
+| tool pending/running | muted work row with explicit verb and state |
+| tool success | muted `✓ capability · duration · summary` |
+| tool failure | failure `× capability · duration · summary` |
+| tool cancelled | muted `– cancelled` |
 | tool truncated | result row plus `… N lines omitted` |
-| agent queued/active | child spine row with role/name and state word |
-| agent blocked/failed | child spine row with warning/failure symbol and reason |
-| approval | child spine row naming the originating patch/tool and accepted keys |
+| agent queued/active | emphasized work summary without a role rail |
+| agent blocked/failed | warning/failure summary |
+| approval | review row naming the originating patch/tool and accepted keys |
 | system notice | low-contrast `· message`, only for durable user-relevant notices |
 | error | `error │ message` with failure symbol |
 
-Tool rows show state, capability, key argument, duration, and summary. Attached
-output is capped at 100 lines and ends with an omitted-line count. Approval
-always stays attached to the originating execution row.
+Work rows show state, capability, key argument, duration, and summary. Attached
+output is capped at 100 lines and ends with an omitted-line count.
 
 #### Scroll Contract
 
@@ -265,8 +243,8 @@ always stays attached to the originating execution row.
 
 - Lives immediately above the composer.
 - Owns current ephemeral execution state; no other rail repeats it.
-- Ready: visible prompt affordance and command discovery.
-- Running: explicit verb plus capability, never spinner-only.
+- Ready: quiet `• Ready`; command discovery stays behind `/help`.
+- Running: `• Working (<detail> · esc to interrupt)`, never spinner-only.
 - Review: approval action and key choices.
 - Queued: count remains visible without flooding the transcript.
 - Detached scroll: new-output count and return-to-latest key.
@@ -282,64 +260,60 @@ The single row resolves simultaneous state in this order:
 5. queued follow-ups
 6. ready
 
-Within one priority, show the latest foreground target. If more than one sibling
-is active, prefix the latest target with the total, for example
-`3 active · searchText`. A completion immediately selects the next active
-sibling; it never leaves a stale target.
+Within one priority, show the latest foreground target. A completion immediately
+selects the next active sibling; it never leaves a stale target.
 
 ### Composer
 
-- Always visually focused with a leading `›`.
-- Empty state says what can be done, not how the UI was implemented.
+- Always visually focused with a leading `>`.
+- Empty state is an unlabeled hardware cursor, matching a native shell prompt.
 - `/` opens command discovery; command and model tokens remain intact.
-- Editor borders use low-contrast rules and never consume decorative side rails.
+- A single accent-tinted top rule separates the composer. There is no bottom
+  border and no decorative side rail.
 
 ### Command / Model Picker
 
 - Uses the existing `showOverlay()` compositor with a bounded overlay contract;
   it does not consume transcript rows.
 - Searchable, keyboard-first, active selection obvious.
-- Keeps transcript, identity, composer, and footer stable.
+- Keeps transcript, context title, and composer stable.
 - Model changes are visibly session-scoped.
 - Captures focus while open; `Escape` restores composer focus.
 - Maximum width is `min(76, terminal - 4)` and maximum height is 40% of terminal
   rows. At degraded dimensions it falls back to compact in-flow results.
 
-### Status Rail
+### Response Metrics
 
-Segment priority, highest first:
-
-1. model
-2. context utilization
-3. git/provider health
-4. active tasks/queue
-
-Low-priority segments disappear instead of clipping core labels.
+- Metrics follow the answer instead of occupying a permanent footer.
+- Full/wide: throughput, cache-hit ratio, and duration when measured.
+- Compact: cache-hit ratio and duration.
+- Minimal/degraded: duration only.
+- Missing measurements disappear; the UI never invents telemetry.
 
 ### State Ownership Matrix
 
 | Runtime state | Transcript | Activity | Composer | Status | Accepted keys / transition |
 | --- | --- | --- | --- | --- | --- |
-| ready | none | `ready` affordance | enabled | persistent telemetry | text submits; `/` opens picker |
-| waiting for model | session row once | `waiting for model` | queue enabled | model visible | `Ctrl+C` cancels wait |
-| assistant streaming | in-place assistant row | `writing response` | queue enabled | context updates on event | `Ctrl+C` preserves partial output |
-| tool running | execution-spine child | verb + capability | queue enabled | task count increments | `Ctrl+C` cancels active run |
-| agent active | execution-spine child | agent name + current action | queue enabled | agent count | durable spine row only |
+| ready | none | `• Ready` | enabled | none | text submits; `/` opens picker |
+| waiting for model | thought row when measured | `• Working` | queue enabled | none | `Ctrl+C` cancels wait |
+| assistant streaming | unlabeled answer row | `• Working` | queue enabled | metrics follow answer | `Ctrl+C` preserves partial output |
+| tool running | muted work row | verb + capability | queue enabled | none | `Ctrl+C` cancels active run |
+| agent active | emphasized work row | agent action | queue enabled | none | durable work row only |
 | approval requested | attached approval row | explicit subject + keys | disabled | warning health | `y` approve, `n` reject, `Esc` reject |
-| queued follow-up | durable user queue row | queued count | enabled | queue count | `/queue`, `/clear` |
-| cancelled | cancellation result row | `cancelled` then ready | enabled | task count decrements | next input |
-| failed | error/result row | concise failure then ready | enabled | failure health until next run | `/resume` when available |
-| interrupted/resumable | system row | `resume available` | enabled | session health warning | `/resume` |
-| provider unavailable | system/error row | explicit provider issue | enabled for commands | provider failure | `/model`, `/accounts` |
-| context warning/critical | no duplicate prose | warning in activity only at critical | enabled | context warning token | `/new`, `/clear` |
-| no models/no matches | picker empty state | unchanged | picker owns input | unchanged | edit query or `Esc` |
-| transcript detached | durable feed unchanged | `↓ N new · Alt+End latest` | enabled | unchanged | transcript keys only when composer empty |
+| queued follow-up | no duplicate transcript row | queued count | enabled | none | `/queue`, `/clear` |
+| cancelled | cancellation result row | cancelled then ready | enabled | none | next input |
+| failed | error/result row | concise failure then ready | enabled | none | `/resume` when available |
+| interrupted/resumable | system row | resume available | enabled | none | `/resume` |
+| provider unavailable | system/error row | explicit provider issue | enabled for commands | none | `/model`, `/accounts` |
+| context warning/critical | no duplicate prose | warning in activity only at critical | enabled | none | `/new`, `/clear` |
+| no models/no matches | picker empty state | unchanged | picker owns input | none | edit query or `Esc` |
+| transcript detached | durable feed unchanged | `↓ N new · Alt+End latest` | enabled | none | transcript keys only when composer empty |
 
-An event has one primary surface. Durable facts go to the transcript; ephemeral
-work goes to activity; environment telemetry goes to status.
+An event has one primary surface. Durable facts and measured response telemetry
+go to the transcript; ephemeral work goes to activity.
 
 The `agent active` transition exposes no dedicated detail picker in this
-redesign; the durable execution-spine row is the only agent detail surface.
+redesign; the durable work row is the only agent detail surface.
 
 ## 6. Motion & Interaction
 
@@ -366,19 +340,17 @@ Terminal rendering is event-driven; no decorative animation is introduced.
   appended synchronously, then activity transitions to `ready` in the same
   completion/failure event after active handles clear.
 
-### Execution Spine Width Rules
+### Response Width Rules
 
-- Wide/full: state, capability, key argument, duration, and summary may share
-  one row when measured cells fit.
-- Compact: preserve state + capability; key argument is one atomic
-  middle-ellipsized token; duration and summary disappear in that order.
-- Minimal: render only spine glyph, state symbol/word, and capability.
-- Degraded: flatten to `state capability` without nested rails.
-- Continuation prose aligns beneath the content after the spine; nesting never
-  exceeds one visible rail at compact/minimal widths.
-- Agent names and capability names are atomic. If either exceeds its budget,
-  middle-ellipsize it rather than wrapping inside the token.
-- Summaries wrap only in full/wide modes and remain CJK/ANSI cell-safe.
+- Wide/full: prompt bands span the terminal; answer prose remains capped to a
+  readable measure; complete response metrics may share one row.
+- Compact: prompt tint remains full width; metrics drop throughput before
+  wrapping.
+- Minimal: prompt band keeps content only; answer remains unlabeled.
+- Degraded: prompt tint may flatten to one row but roles remain distinguishable.
+- Continuation prose aligns to the answer gutter without a role label.
+- Capability names remain atomic and middle-ellipsize before wrapping.
+- Work summaries wrap only in full/wide modes and remain CJK/ANSI cell-safe.
 
 ## 7. Depth & Surface
 
@@ -387,7 +359,8 @@ Terminal rendering is event-driven; no decorative animation is introduced.
 Depth comes from luminance and containment, not nested boxes:
 
 - primary shell: terminal background
-- transcript roles: label/rail hierarchy
+- submitted prompts: one full-width slate surface
+- assistant flow: luminance hierarchy on the terminal background
 - active picker: bounded higher-contrast surface
 - approval/error: semantic accent plus explicit text
 - separators: one-cell ghost rules
@@ -411,12 +384,12 @@ No gradients, shadows, rounded-card imitation, or decorative emoji clusters.
 
 ### Critical Screen Specifications
 
-1. **Idle:** identity, empty conversation canvas, ready or resumable activity,
-   focused composer, model/context status. “Workspace ready” is not chat.
-2. **Streaming:** partial assistant row in transcript, explicit writing state,
+1. **Idle:** context title, empty transcript, ready or resumable activity, and
+   focused `>` composer. “Workspace ready” is not chat.
+2. **Streaming:** partial unlabeled assistant prose, explicit working state, and
    composer still available for durable queueing.
-3. **Parallel work:** one execution spine with tool/agent siblings and explicit
-   states; no repeated full-card boxes.
+3. **Parallel work:** restrained work rows with explicit states; no role labels,
+   execution tree, or repeated full-card boxes.
 4. **Approval:** originating execution row plus attached approval, activity owns
    `y/n` keys, composer disabled.
 5. **Failure:** failed child/result remains durable; activity returns to ready
@@ -424,9 +397,9 @@ No gradients, shadows, rounded-card imitation, or decorative emoji clusters.
 6. **Detached transcript:** content position is stable; `↓ N new` is visible.
 7. **Command/model picker:** bounded overlay, active row in reverse video,
    shell remains visible.
-8. **Compact/minimal:** optional context rail disappears, footer retains model
-   before context/git/task metadata.
-9. **Degraded:** bounded terminal-size notice, composer, and exit path only.
+8. **Compact/minimal:** prompt tint and unlabeled answer remain; optional
+   metrics disappear before content.
+9. **Degraded:** bounded context title, prompt surface, composer, and exit path.
 
 ### Accepted Debt
 

@@ -1,6 +1,8 @@
 const ESC = "\u001b[";
+const ESCAPE = "\u001b";
 
 const tone = (code: number, value: string) => `${ESC}38;5;${code}m${value}${ESC}0m`;
+const style = (code: string, value: string) => `${ESC}${code}m${value}${ESC}0m`;
 
 export const accent = (value: string) => tone(111, value);
 export const text = (value: string) => tone(255, value);
@@ -9,6 +11,57 @@ export const dim = (value: string) => tone(239, value);
 export const success = (value: string) => tone(114, value);
 export const warning = (value: string) => tone(214, value);
 export const failure = (value: string) => tone(203, value);
+export const italic = (value: string) => style("3", value);
+export const emphasis = (value: string) => style("1;3", value);
+
+export function sanitizeTerminalText(value: string): string {
+	const normalized = value.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").replace(/\t/gu, "    ");
+	let output = "";
+	let index = 0;
+	while (index < normalized.length) {
+		const character = Array.from(normalized.slice(index))[0];
+		if (!character) break;
+		if (character === ESCAPE) {
+			const next = normalized[index + 1];
+			if (next === "[") {
+				index += 2;
+				while (index < normalized.length) {
+					const code = normalized.charCodeAt(index);
+					index += 1;
+					if (code >= 0x40 && code <= 0x7e) break;
+				}
+				continue;
+			}
+			if (next === "]" || next === "P" || next === "X" || next === "^" || next === "_") {
+				const bellTerminated = next === "]";
+				index += 2;
+				while (index < normalized.length) {
+					if (bellTerminated && normalized.charCodeAt(index) === 0x07) {
+						index += 1;
+						break;
+					}
+					if (normalized[index] === ESCAPE && normalized[index + 1] === "\\") {
+						index += 2;
+						break;
+					}
+					const part = Array.from(normalized.slice(index))[0];
+					index += part?.length ?? 1;
+				}
+				continue;
+			}
+			index += next === undefined ? 1 : 2;
+			continue;
+		}
+		const codePoint = character.codePointAt(0) ?? 0;
+		if ((codePoint < 0x20 && character !== "\n") || codePoint === 0x7f || (codePoint >= 0x80 && codePoint <= 0x9f)) {
+			index += character.length;
+			continue;
+		}
+		output += character;
+		index += character.length;
+	}
+	return output;
+}
 
 function readAnsiSequence(value: string): string | undefined {
 	if (!value.startsWith(ESC)) return undefined;
@@ -102,4 +155,11 @@ export function ellipsizeCells(value: string, columns: number): string {
 
 export function frameLine(value: string, columns: number): string {
 	return clipAnsi(value, columns);
+}
+
+export function promptSurfaceLine(value: string, columns: number): string {
+	const width = Math.max(1, columns);
+	const clipped = clipAnsi(value, width);
+	const padding = " ".repeat(Math.max(0, width - cellWidth(stripAnsi(clipped))));
+	return `${ESC}48;5;238m${ESC}38;5;255m${clipped}${padding}${ESC}0m`;
 }

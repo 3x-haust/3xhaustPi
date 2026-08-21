@@ -26,18 +26,22 @@ describe("product identity surfaces", () => {
 		expect(PRODUCT_MACHINE_NAME).toBe("3xhaustpi");
 	});
 
-	it("renders polished product chrome and assistant labels without exposing the machine name", () => {
+	it("renders polished product chrome and unlabeled assistant prose without exposing the machine name", () => {
 		const output = renderTuiFrame(state, 72, 24)
 			.split("\n")
 			.map((line) => stripAnsi(line));
 		expect(output[0]).toBe(PRODUCT_DISPLAY_NAME);
-		expect(output.some((line) => line.trim() === ASSISTANT_DISPLAY_NAME)).toBe(true);
+		expect(output.some((line) => line.trim() === ASSISTANT_DISPLAY_NAME)).toBe(false);
+		expect(output.some((line) => line.trim() === "Identity check")).toBe(true);
 		expect(output.join("\n")).not.toContain(PRODUCT_MACHINE_NAME);
 	});
 
-	it("normalizes machine and generic assistant transcript prefixes to the assistant display name", () => {
+	it("normalizes machine and generic assistant transcript prefixes without rendering a label", () => {
 		for (const prefix of ["3xhaustpi", "3xhaustPi", "Assistant"] as const) {
-			expect(stripAnsi(formatTranscriptEntry(`${prefix} hello`).label)).toBe(ASSISTANT_DISPLAY_NAME);
+			const entry = formatTranscriptEntry(`${prefix} hello`);
+			expect(entry.role).toBe("threeXhaust");
+			expect(entry.content).toBe("hello");
+			expect(stripAnsi(entry.label)).toBe("");
 		}
 	});
 });

@@ -236,6 +236,8 @@ export interface EditorOptions {
 	autocompletePresentation?: "inline" | "overlay";
 	placeholder?: string;
 	promptPrefix?: string;
+	bottomBorder?: boolean;
+	maxVisibleLines?: number;
 	submitSlashArgumentCompletions?: boolean;
 }
 
@@ -340,6 +342,8 @@ export class Editor implements Component, Focusable {
 	private autocompleteOverlayHandle?: OverlayHandle;
 	private promptPrefix = "";
 	private placeholder = "";
+	private bottomBorder = true;
+	private maxVisibleLines: number | undefined;
 	private submitSlashArgumentCompletions = false;
 
 	// Paste tracking for large pastes
@@ -390,6 +394,12 @@ export class Editor implements Component, Focusable {
 		this.autocompletePresentation = options.autocompletePresentation ?? "inline";
 		this.placeholder = options.placeholder ?? "";
 		this.promptPrefix = options.promptPrefix ?? "";
+		this.bottomBorder = options.bottomBorder ?? true;
+		const maxVisibleLines = options.maxVisibleLines;
+		this.maxVisibleLines =
+			maxVisibleLines === undefined || !Number.isFinite(maxVisibleLines)
+				? undefined
+				: Math.max(1, Math.min(20, Math.floor(maxVisibleLines)));
 		this.submitSlashArgumentCompletions = options.submitSlashArgumentCompletions ?? false;
 	}
 
@@ -541,7 +551,7 @@ export class Editor implements Component, Focusable {
 
 		// Calculate max visible lines: 30% of terminal height, minimum 5 lines
 		const terminalRows = this.tui.terminal.rows;
-		const maxVisibleLines = Math.max(5, Math.floor(terminalRows * 0.3));
+		const maxVisibleLines = this.maxVisibleLines ?? Math.max(5, Math.floor(terminalRows * 0.3));
 
 		// Find the cursor line index in layoutLines
 		let cursorLineIndex = layoutLines.findIndex((line) => line.hasCursor);
@@ -637,12 +647,14 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Render bottom border (with scroll indicator if more content below)
-		const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
-		if (linesBelow > 0) {
-			const border = createScrollBorder("↓", linesBelow, width);
-			result.push(this.borderColor(border));
-		} else {
-			result.push(horizontal.repeat(width));
+		if (this.bottomBorder) {
+			const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
+			if (linesBelow > 0) {
+				const border = createScrollBorder("↓", linesBelow, width);
+				result.push(this.borderColor(border));
+			} else {
+				result.push(horizontal.repeat(width));
+			}
 		}
 
 		// Add autocomplete list if active. Overlay presentation is opt-in so

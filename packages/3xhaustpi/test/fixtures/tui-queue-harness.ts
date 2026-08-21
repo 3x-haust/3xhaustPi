@@ -89,6 +89,12 @@ await runTui({
 			model: "fixture-model",
 			objective,
 		});
+		hooks.onEvent({
+			type: "model.completed",
+			responseId: `response_fixture_${requestId}`,
+			usage: { input: 64, output: 16, cacheRead: 48 },
+			durationMs: 1_200,
+		});
 		hooks.onEvent({ type: "capability.started", capability: "searchText" });
 		await new Promise<void>((resolveWait, rejectWait) => {
 			const timeout = setTimeout(resolveWait, 1_500);
