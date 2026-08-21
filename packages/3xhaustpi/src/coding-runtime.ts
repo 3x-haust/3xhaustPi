@@ -717,7 +717,7 @@ export async function runCodingTask(input: CodingTaskInput): Promise<CodingTaskR
 	const providerImages = images.map((image) => ({ type: "image" as const, ...image }));
 	const provider = recovered?.provider ?? input.provider ?? DEFAULT_PROVIDER;
 	const modelId = recovered?.model ?? input.model ?? DEFAULT_MODEL;
-	const approve = recovered?.approve ?? input.approve;
+	const approve = input.approve;
 	const resources = input.resources?.enabled
 		? loadHarnessResources({
 				projectRoot,

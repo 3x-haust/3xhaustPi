@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	configuredPythonConcurrency,
 	providerCacheSessionId,
@@ -25,6 +25,8 @@ function approvedPatchCheckpoint(input: {
 	readonly relativePath: string;
 	readonly before: string;
 	readonly after: string;
+	readonly phase?: "provider-settled" | "patch-approved";
+	readonly checkpointApprove?: boolean;
 }): ResumeCheckpoint {
 	const objective = `update ${input.relativePath}`;
 	const snapshot = createProjectSnapshot(input.project, objective);
@@ -40,10 +42,10 @@ function approvedPatchCheckpoint(input: {
 	const fingerprint = `fingerprint_security_${checkpointSequence}`;
 	const payload = JSON.stringify({
 		version: 1,
-		phase: "patch-approved",
+		phase: input.phase ?? "patch-approved",
 		projectRoot: input.project,
 		objective,
-		approve: true,
+		approve: input.checkpointApprove ?? true,
 		provider: "openai-codex",
 		model: "gpt-5.6-terra",
 		sessionId,
@@ -229,6 +231,35 @@ describe("standalone runtime foundations", () => {
 
 		expect(result?.diagnostics?.command).toBe("git diff --check");
 		expect(() => statSync(join(project, "resume-validation-script-ran"))).toThrow();
+	});
+
+	it("uses current host approval policy instead of a recovered auto-approve flag", async () => {
+		const project = temporaryDirectory();
+		const stateDirectory = temporaryDirectory();
+		writeFileSync(join(project, "target.txt"), "before\n");
+		const checkpoint = approvedPatchCheckpoint({
+			project,
+			statePath: join(stateDirectory, "state.sqlite"),
+			relativePath: "target.txt",
+			before: "before\n",
+			after: "after\n",
+			phase: "provider-settled",
+			checkpointApprove: true,
+		});
+		const requestApproval = vi.fn(async () => false);
+
+		const result = await runCodingTask({
+			projectRoot: project,
+			objective: "",
+			approve: false,
+			statePath: join(stateDirectory, "state.sqlite"),
+			resumeCheckpoint: checkpoint,
+			requestApproval,
+		});
+
+		expect(requestApproval).toHaveBeenCalledOnce();
+		expect(result.outcome).toBe("rejected");
+		expect(readFileSync(join(project, "target.txt"), "utf8")).toBe("before\n");
 	});
 
 	it("rejects patch targets with symlinked path components without writing outside the project", async () => {
