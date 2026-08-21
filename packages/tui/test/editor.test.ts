@@ -2796,6 +2796,60 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 		});
 
+		it("opens slash argument completions with Tab on an empty argument prefix", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const provider = new CombinedAutocompleteProvider(
+				[
+					{
+						name: "model",
+						description: "Switch model",
+						getArgumentCompletions: () => [
+							{ value: "gpt-5.6-luna", label: "gpt-5.6-luna" },
+							{ value: "gpt-5.6-terra", label: "gpt-5.6-terra" },
+						],
+					},
+				],
+				process.cwd(),
+			);
+			editor.setAutocompleteProvider(provider);
+			editor.setText("/model ");
+
+			editor.handleInput("\t");
+			await flushAutocomplete();
+
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+			assert.strictEqual(editor.getText(), "/model ");
+		});
+
+		it("can submit a slash argument immediately when the host opts in", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme, {
+				submitSlashArgumentCompletions: true,
+			});
+			const provider = new CombinedAutocompleteProvider(
+				[
+					{
+						name: "model",
+						description: "Switch model",
+						getArgumentCompletions: () => [{ value: "gpt-5.6-luna", label: "gpt-5.6-luna" }],
+					},
+				],
+				process.cwd(),
+			);
+			let submitted = "";
+			editor.onSubmit = (value) => {
+				submitted = value;
+			};
+			editor.setAutocompleteProvider(provider);
+			editor.setText("/model ");
+
+			editor.handleInput("\t");
+			await flushAutocomplete();
+			editor.handleInput("\r");
+
+			assert.strictEqual(submitted, "/model gpt-5.6-luna");
+			assert.strictEqual(editor.getText(), "");
+		});
+
 		it("ignores invalid slash command argument completion results", async () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			const provider = new CombinedAutocompleteProvider(
@@ -4146,6 +4200,73 @@ describe("Editor component", () => {
 			editor.handleInput("\r");
 
 			assert.strictEqual(submitted, pastedText);
+		});
+	});
+
+	describe("Overlay autocomplete and prompt prefix", () => {
+		const slashProvider: AutocompleteProvider = {
+			async getSuggestions() {
+				return {
+					prefix: "/",
+					items: [
+						{ value: "help", label: "help", description: "Show help" },
+						{ value: "model", label: "model", description: "Select model" },
+					],
+				};
+			},
+			applyCompletion,
+		};
+
+		it("keeps inline autocomplete as the default editor behavior", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setAutocompleteProvider(slashProvider);
+
+			editor.handleInput("/");
+			await flushAutocomplete();
+
+			const rendered = stripVTControlCharacters(editor.render(60).join("\n"));
+			assert.ok(rendered.includes("help"));
+			assert.ok(rendered.includes("model"));
+		});
+
+		it("renders autocomplete through a non-capturing overlay when explicitly enabled", async () => {
+			const terminal = new VirtualTerminal(60, 20);
+			const tui = new TUI(terminal);
+			const editor = new Editor(tui, defaultEditorTheme, { autocompletePresentation: "overlay" });
+			editor.setAutocompleteProvider(slashProvider);
+			tui.addChild(editor);
+			tui.setFocus(editor);
+			tui.start();
+
+			editor.handleInput("/");
+			await flushAutocomplete();
+			tui.requestRender(true);
+			await new Promise<void>((resolve) => process.nextTick(resolve));
+			await terminal.waitForRender();
+
+			assert.ok(editor.isShowingAutocomplete());
+			const editorRows = stripVTControlCharacters(editor.render(60).join("\n"));
+			assert.ok(!editorRows.includes("Show help"));
+			const viewport = terminal.getViewport().join("\n");
+			assert.ok(viewport.includes("Show help"));
+			assert.ok(viewport.includes("┌"));
+			assert.ok(viewport.includes("└"));
+			const topBorder = terminal.getViewport().find((line) => line.includes("┌"));
+			assert.strictEqual(topBorder?.indexOf("┌"), 0);
+
+			editor.handleInput("\x1b");
+			assert.equal(editor.isShowingAutocomplete(), false);
+			tui.stop();
+		});
+
+		it("lets the editor visibly own the prompt prefix and cursor marker", () => {
+			const editor = new Editor(createTestTUI(20, 10), defaultEditorTheme, { promptPrefix: "› " });
+			editor.focused = true;
+
+			const row = editor.render(20)[1] ?? "";
+			assert.ok(stripVTControlCharacters(row).startsWith("› "));
+			assert.ok(row.includes("\x1b_pi:c\x07"));
+			assert.equal(visibleWidth(row), 20);
 		});
 	});
 });

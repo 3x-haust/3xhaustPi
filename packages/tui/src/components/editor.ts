@@ -2,7 +2,7 @@ import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocompl
 import { getKeybindings } from "../keybindings.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
-import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.ts";
+import { type Component, CURSOR_MARKER, type Focusable, type OverlayHandle, type TUI } from "../tui.ts";
 import { UndoStack } from "../undo-stack.ts";
 import {
 	cjkBreakRegex,
@@ -233,6 +233,37 @@ export interface EditorTheme {
 export interface EditorOptions {
 	paddingX?: number;
 	autocompleteMaxVisible?: number;
+	autocompletePresentation?: "inline" | "overlay";
+	promptPrefix?: string;
+	submitSlashArgumentCompletions?: boolean;
+}
+
+class AutocompleteOverlaySurface implements Component {
+	private readonly list: SelectList;
+	private readonly borderColor: (value: string) => string;
+
+	constructor(list: SelectList, borderColor: (value: string) => string) {
+		this.list = list;
+		this.borderColor = borderColor;
+	}
+
+	render(width: number): string[] {
+		if (width < 3) return this.list.render(Math.max(1, width));
+		const innerWidth = width - 2;
+		const horizontal = this.borderColor("─".repeat(innerWidth));
+		const body = this.list.render(innerWidth).map((line) => {
+			const clipped = sliceByColumn(line, 0, innerWidth, true);
+			const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
+			return `${this.borderColor("│")}${clipped}${padding}${this.borderColor("│")}`;
+		});
+		return [
+			`${this.borderColor("┌")}${horizontal}${this.borderColor("┐")}`,
+			...body,
+			`${this.borderColor("└")}${horizontal}${this.borderColor("┘")}`,
+		];
+	}
+
+	invalidate(): void {}
 }
 
 const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
@@ -304,6 +335,10 @@ export class Editor implements Component, Focusable {
 	private autocompleteRequestTask: Promise<void> = Promise.resolve();
 	private autocompleteStartToken: number = 0;
 	private autocompleteRequestId: number = 0;
+	private autocompletePresentation: "inline" | "overlay" = "inline";
+	private autocompleteOverlayHandle?: OverlayHandle;
+	private promptPrefix = "";
+	private submitSlashArgumentCompletions = false;
 
 	// Paste tracking for large pastes
 	private pastes: Map<number, string> = new Map();
@@ -350,6 +385,9 @@ export class Editor implements Component, Focusable {
 		this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+		this.autocompletePresentation = options.autocompletePresentation ?? "inline";
+		this.promptPrefix = options.promptPrefix ?? "";
+		this.submitSlashArgumentCompletions = options.submitSlashArgumentCompletions ?? false;
 	}
 
 	/** Set of currently valid paste IDs, for marker-aware segmentation. */
@@ -483,10 +521,12 @@ export class Editor implements Component, Focusable {
 		const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
 		const paddingX = Math.min(this.paddingX, maxPadding);
 		const contentWidth = Math.max(1, width - paddingX * 2);
+		const promptPrefixWidth = visibleWidth(this.promptPrefix);
+		const textContentWidth = Math.max(1, contentWidth - promptPrefixWidth);
 
 		// Layout width: with padding the cursor can overflow into it,
 		// without padding we reserve 1 column for the cursor.
-		const layoutWidth = Math.max(1, contentWidth - (paddingX ? 0 : 1));
+		const layoutWidth = Math.max(1, textContentWidth - (paddingX ? 0 : 1));
 
 		// Store for cursor navigation (must match wrapping width)
 		this.lastWidth = layoutWidth;
@@ -536,7 +576,11 @@ export class Editor implements Component, Focusable {
 		// autocomplete (e.g. slash-command menu) is visible.
 		const emitCursorMarker = this.focused;
 
-		for (const layoutLine of visibleLines) {
+		for (const [visibleIndex, layoutLine] of visibleLines.entries()) {
+			const prefix =
+				this.promptPrefix && this.scrollOffset + visibleIndex === 0
+					? this.promptPrefix
+					: " ".repeat(promptPrefixWidth);
 			let displayText = layoutLine.text;
 			let lineVisibleWidth = visibleWidth(layoutLine.text);
 			let cursorInPadding = false;
@@ -564,18 +608,20 @@ export class Editor implements Component, Focusable {
 					displayText = before + marker + cursor;
 					lineVisibleWidth = lineVisibleWidth + 1;
 					// If cursor overflows content width into the padding, flag it
-					if (lineVisibleWidth > contentWidth && paddingX > 0) {
+					if (lineVisibleWidth > textContentWidth && paddingX > 0) {
 						cursorInPadding = true;
 					}
 				}
 			}
 
 			// Calculate padding based on actual visible width
-			const padding = " ".repeat(Math.max(0, contentWidth - lineVisibleWidth));
+			const lineWithPrefix = `${prefix}${displayText}`;
+			const totalLineWidth = promptPrefixWidth + lineVisibleWidth;
+			const padding = " ".repeat(Math.max(0, contentWidth - totalLineWidth));
 			const lineRightPadding = cursorInPadding ? rightPadding.slice(1) : rightPadding;
 
 			// Render the line (no side borders, just horizontal lines above and below)
-			result.push(`${leftPadding}${displayText}${padding}${lineRightPadding}`);
+			result.push(`${leftPadding}${lineWithPrefix}${padding}${lineRightPadding}`);
 		}
 
 		// Render bottom border (with scroll indicator if more content below)
@@ -587,8 +633,9 @@ export class Editor implements Component, Focusable {
 			result.push(horizontal.repeat(width));
 		}
 
-		// Add autocomplete list if active
-		if (this.autocompleteState && this.autocompleteList) {
+		// Add autocomplete list if active. Overlay presentation is opt-in so
+		// existing Editor consumers keep the historical inline dropdown.
+		if (this.autocompletePresentation === "inline" && this.autocompleteState && this.autocompleteList) {
 			const autocompleteResult = this.autocompleteList.render(contentWidth);
 			for (const line of autocompleteResult) {
 				const lineWidth = visibleWidth(line);
@@ -710,7 +757,12 @@ export class Editor implements Component, Focusable {
 					this.state.cursorLine = result.cursorLine;
 					this.setCursorCol(result.cursorCol);
 
-					if (this.autocompletePrefix.startsWith("/")) {
+					const completedSlashCommand =
+						this.state.lines.length === 1 && (this.state.lines[0] ?? "").trimStart().startsWith("/");
+					if (
+						this.autocompletePrefix.startsWith("/") ||
+						(this.submitSlashArgumentCompletions && completedSlashCommand)
+					) {
 						this.cancelAutocomplete();
 						// Fall through to submit
 					} else {
@@ -2147,7 +2199,7 @@ export class Editor implements Component, Focusable {
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 		const beforeCursor = currentLine.slice(0, this.state.cursorCol);
 
-		if (this.isInSlashCommandContext(beforeCursor) && !beforeCursor.trimStart().includes(" ")) {
+		if (this.isInSlashCommandContext(beforeCursor)) {
 			this.handleSlashCommandCompletion();
 		} else {
 			this.forceFileAutocomplete(true);
@@ -2308,6 +2360,8 @@ export class Editor implements Component, Focusable {
 	}
 
 	private applyAutocompleteSuggestions(suggestions: AutocompleteSuggestions, state: "regular" | "force"): void {
+		this.autocompleteOverlayHandle?.hide();
+		this.autocompleteOverlayHandle = undefined;
 		this.autocompletePrefix = suggestions.prefix;
 		this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
 
@@ -2317,6 +2371,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		this.autocompleteState = state;
+		this.syncAutocompleteOverlay();
 	}
 
 	private cancelAutocompleteRequest(): void {
@@ -2330,9 +2385,31 @@ export class Editor implements Component, Focusable {
 	}
 
 	private clearAutocompleteUi(): void {
+		this.autocompleteOverlayHandle?.hide();
+		this.autocompleteOverlayHandle = undefined;
 		this.autocompleteState = null;
 		this.autocompleteList = undefined;
 		this.autocompletePrefix = "";
+	}
+
+	private syncAutocompleteOverlay(): void {
+		if (this.autocompletePresentation !== "overlay" || !this.autocompleteList || !this.autocompleteState) return;
+		if (this.autocompleteOverlayHandle) {
+			this.tui.requestRender();
+			return;
+		}
+		const terminalColumns = this.tui.terminal.columns;
+		const narrow = terminalColumns < 80;
+		this.autocompleteOverlayHandle = this.tui.showOverlay(
+			new AutocompleteOverlaySurface(this.autocompleteList, this.borderColor),
+			{
+				width: narrow ? Math.max(1, terminalColumns) : Math.min(76, Math.max(1, terminalColumns - 4)),
+				maxHeight: "40%",
+				anchor: "bottom-center",
+				margin: { top: 1, right: narrow ? 0 : 2, bottom: 5, left: narrow ? 0 : 2 },
+				nonCapturing: true,
+			},
+		);
 	}
 
 	private cancelAutocomplete(): void {

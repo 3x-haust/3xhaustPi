@@ -1,0 +1,64 @@
+{
+  "name": "3xhaustpi",
+  "version": "0.1.0",
+  "description": "Semantic-only local coding runtime and terminal client for 3xhaustPi",
+  "type": "module",
+  "bin": {
+    "3xhaustpi": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/cli.js",
+    "./credential-broker": "./dist/credential-broker.js",
+    "./auth-runtime": {
+      "types": "./dist/auth-runtime.d.ts",
+      "default": "./dist/auth-runtime.js"
+    },
+    "./desktop-runtime": {
+      "types": "./dist/desktop-runtime.d.ts",
+      "default": "./dist/desktop-runtime.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    }
+  },
+  "files": [
+    "dist",
+    "resources",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "shx rm -rf dist",
+    "build": "node build.mjs",
+    "build:native": "npm run build && node scripts/build-native-release.mjs",
+    "test": "vitest --run",
+    "prepack": "npm run clean && npm run build"
+  },
+  "devDependencies": {
+    "shx": "0.4.0",
+    "vitest": "4.1.9"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "coding-agent",
+    "ai",
+    "cli",
+    "tui",
+    "semantic"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-tui": "0.82.1",
+    "@napi-rs/keyring": "1.3.0",
+    "typebox": "1.1.38"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3x-haust/3xhaustPi.git",
+    "directory": "packages/3xhaustpi"
+  }
+}

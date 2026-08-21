@@ -278,15 +278,17 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 				context.tools,
 				model.compat?.supportsOpenAIGrammarTools ?? false,
 			);
-			const cacheSessionId = options?.cacheRetention === "none" ? undefined : options?.sessionId;
-			const codexSessionId = clampOpenAIPromptCacheKey(cacheSessionId);
-			let body = buildRequestBody(model, context, options, codexSessionId, grammarToolInputProperties);
+			const resourceSessionId = options?.sessionId;
+			const promptCacheKey =
+				options?.cacheRetention === "none" ? undefined : (options?.promptCacheKey ?? resourceSessionId);
+			const codexPromptCacheKey = clampOpenAIPromptCacheKey(promptCacheKey);
+			let body = buildRequestBody(model, context, options, codexPromptCacheKey, grammarToolInputProperties);
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as RequestBody;
 			}
-			const websocketRequestId = codexSessionId || uuidv7();
-			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, codexSessionId);
+			const websocketRequestId = resourceSessionId || uuidv7();
+			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, resourceSessionId);
 			const websocketHeaders = buildWebSocketHeaders(
 				model.headers,
 				options?.headers,
@@ -299,9 +301,9 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 			const websocketConnectTimeoutMs = normalizeTimeoutMs(options?.websocketConnectTimeoutMs);
 			const transport = options?.transport || "auto";
 			let startEmitted = false;
-			const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(cacheSessionId);
+			const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(resourceSessionId);
 			if (websocketDisabledForSession) {
-				recordWebSocketSseFallback(cacheSessionId);
+				recordWebSocketSseFallback(resourceSessionId);
 			}
 
 			if (transport !== "sse" && !websocketDisabledForSession) {
@@ -327,7 +329,7 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 							},
 							httpTimeoutMs,
 							websocketConnectTimeoutMs,
-							cacheSessionId,
+							resourceSessionId,
 							grammarToolInputProperties,
 							options,
 						);
@@ -368,11 +370,11 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 								requestBytes: new TextEncoder().encode(bodyJson).byteLength,
 							}),
 						);
-						recordWebSocketFailure(cacheSessionId, error);
+						recordWebSocketFailure(resourceSessionId, error);
 						if (websocketStarted) {
 							throw error;
 						}
-						recordWebSocketSseFallback(cacheSessionId);
+						recordWebSocketSseFallback(resourceSessionId);
 						break;
 					}
 				}

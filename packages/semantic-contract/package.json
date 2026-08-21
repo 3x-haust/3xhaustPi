@@ -1,0 +1,38 @@
+{
+  "name": "@3xhaust/semantic-contract",
+  "version": "0.1.0",
+  "description": "Strict inert semantic output contract for 3xhaustPi protocol v2",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "shx rm -rf dist",
+    "build": "tsgo -p tsconfig.build.json",
+    "test": "vitest --run",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
+  },
+  "devDependencies": {
+    "shx": "0.4.0",
+    "vitest": "4.1.9"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3x-haust/3xhaustPi.git",
+    "directory": "packages/semantic-contract"
+  }
+}

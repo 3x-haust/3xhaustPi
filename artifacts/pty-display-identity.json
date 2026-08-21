@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "checks": [
+    {
+      "columns": 56,
+      "rows": 22,
+      "header": "3xhaustPi  project",
+      "assistantTurn": "3xhaust\nCompleted visual identity check",
+      "machineNameVisible": false,
+      "boundedFixtureTermination": "SIGTERM after exact assistant output"
+    },
+    {
+      "columns": 72,
+      "rows": 24,
+      "header": "3xhaustPi  project",
+      "assistantTurn": "3xhaust\nCompleted visual identity check",
+      "machineNameVisible": false,
+      "boundedFixtureTermination": "SIGTERM after exact assistant output"
+    },
+    {
+      "columns": 120,
+      "rows": 32,
+      "header": "3xhaustPi  project",
+      "assistantTurn": "3xhaust\nCompleted visual identity check",
+      "machineNameVisible": false,
+      "boundedFixtureTermination": "SIGTERM after exact assistant output"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+name: 3xhaustPi upstream candidate
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: 3xhaust-upstream-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout standalone repository main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure source reference
+        run: |
+          git remote add upstream https://github.com/earendil-works/pi.git
+          git remote set-url --push upstream DISABLED
+          git fetch --no-tags upstream main
+          node -e "const m=require('./3xhaust/compatibility.json'); process.stdout.write(m.repository.upstreamCommit)" > pinned-upstream.txt
+          git fetch --no-tags upstream "$(cat pinned-upstream.txt)"
+
+      - name: Report standalone source drift
+        id: drift
+        shell: bash
+        run: |
+          PINNED=$(cat pinned-upstream.txt)
+          LATEST=$(git rev-parse upstream/main)
+          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if [ "$PINNED" = "$LATEST" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          git diff --name-status "$PINNED..$LATEST" > upstream-source-diff.txt
+          git log --oneline --no-merges "$PINNED..$LATEST" > upstream-commits.txt
+
+      - name: Stop when source baseline is current
+        if: steps.drift.outputs.changed == 'false'
+        run: echo "The standalone source-port baseline already matches upstream/main."
+
+      - name: Create linear source-port candidate
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          BRANCH: candidates/3xhaustpi/upstream-${{ github.run_id }}
+          LATEST: ${{ steps.drift.outputs.latest }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          SOURCE_DIR=$(mktemp -d)
+          git archive "$LATEST" | tar -x -C "$SOURCE_DIR"
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.github/workflows/' \
+            --exclude 'README.md' \
+            --exclude '3xhaust/' \
+            --exclude 'packages/pi-session/' \
+            "$SOURCE_DIR/" ./
+
+          LATEST="$LATEST" node -e "
+            const fs=require('fs');
+            const path='3xhaust/compatibility.json';
+            const manifest=JSON.parse(fs.readFileSync(path, 'utf8'));
+            manifest.repository.upstreamCommit=process.env.LATEST;
+            fs.writeFileSync(path, JSON.stringify(manifest, null, 2)+'\\n');
+          "
+          git add -A
+          git commit -m "chore: port reviewed upstream source ${LATEST}"
+          git push origin "$BRANCH"
+
+      - name: Open source-port candidate pull request
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: candidates/3xhaustpi/upstream-${{ github.run_id }}
+          PINNED: ${{ steps.drift.outputs.pinned }}
+          LATEST: ${{ steps.drift.outputs.latest }}
+        shell: bash
+        run: |
+          BODY=$(printf '%s\n\n%s\n\n%s\n' \
+            "Automated standalone source-port candidate. This does not merge upstream Git ancestry and is not a stable promotion." \
+            "Source baseline: $PINNED → $LATEST." \
+            "Promote only after 3xhaustPi compatibility, asset inventory, licensing, and security review receipts pass.")
+          gh pr create --base main --head "$BRANCH" --title "chore: evaluate upstream source port ($GITHUB_RUN_ID)" --body "$BODY"
+
+      - name: Upload drift evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upstream-drift-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            upstream-source-diff.txt
+            upstream-commits.txt
+          if-no-files-found: error
+          retention-days: 30

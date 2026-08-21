@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": 2,
+  "repository": {
+    "name": "3x-haust/3xhaustPi",
+    "lineage": "standalone-source-port",
+    "importedFrom": "earendil-works/pi",
+    "upstreamCommit": "e9e86e1c832de1edfff2d42041c8f9087d72a0cf",
+    "syncStrategy": "reviewed-source-candidate-pr",
+    "stablePromotionRequiresExactCommitReceipt": true
+  },
+  "runtime": {
+    "node": ">=22.19.0",
+    "electron": ">=43 <44",
+    "platforms": [
+      "darwin-arm64",
+      "darwin-x64",
+      "win32-x64",
+      "win32-arm64"
+    ]
+  },
+  "packages": [
+    {
+      "name": "@earendil-works/pi-ai",
+      "workspace": "packages/ai",
+      "version": "0.82.1",
+      "requiredExports": [".", "./oauth"]
+    },
+    {
+      "name": "@earendil-works/pi-agent-core",
+      "workspace": "packages/agent",
+      "version": "0.82.1",
+      "requiredExports": [".", "./node"]
+    },
+    {
+      "name": "@3xhaust/semantic-contract",
+      "workspace": "packages/semantic-contract",
+      "version": "0.1.0",
+      "requiredExports": ["."]
+    },
+    {
+      "name": "@3xhaust/core",
+      "workspace": "packages/core",
+      "version": "0.1.0",
+      "requiredExports": ["."]
+    },
+    {
+      "name": "@3xhaust/pi-adapter",
+      "workspace": "packages/pi-adapter",
+      "version": "0.1.0",
+      "requiredExports": ["."]
+    },
+    {
+      "name": "@3xhaust/pi-session",
+      "workspace": "packages/pi-session",
+      "version": "0.1.0",
+      "requiredExports": ["."]
+    }
+  ],
+  "embedding": {
+    "ambientResourceDiscovery": false,
+    "ambientAuthFile": false,
+    "ambientProjectExtensions": false,
+    "ambientGlobalExtensions": false,
+    "builtinFileTools": false,
+    "builtinShellTools": false,
+    "credentialsOwner": "3xhaustpi",
+    "toolsOwner": "3xhaustpi",
+    "policyOwner": "3xhaustpi"
+  },
+  "artifacts": {
+    "requiredInventory": [
+      "packages/semantic-contract/LICENSE",
+      "packages/semantic-contract/dist/index.js",
+      "packages/semantic-contract/dist/index.d.ts",
+      "packages/core/LICENSE",
+      "packages/core/dist/index.js",
+      "packages/core/dist/index.d.ts",
+      "packages/pi-adapter/LICENSE",
+      "packages/pi-adapter/dist/index.js",
+      "packages/pi-adapter/dist/index.d.ts",
+      "packages/pi-session/LICENSE",
+      "packages/pi-session/dist/index.js",
+      "packages/pi-session/dist/index.d.ts"
+    ],
+    "receiptSchemaVersion": 2,
+    "digest": "sha256",
+    "provenance": "github-actions-exact-commit"
+  }
+}

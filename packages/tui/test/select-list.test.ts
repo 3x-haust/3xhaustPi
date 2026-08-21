@@ -113,4 +113,17 @@ describe("SelectList", () => {
 		assert.ok(rendered[0].includes("…"));
 		assert.equal(visibleIndexOf(rendered[0], "first"), visibleIndexOf(rendered[1], "second"));
 	});
+
+	it("renders selected rows with a leading marker and ANSI-safe reset", () => {
+		const list = new SelectList([{ value: "model", label: "model", description: "current" }], 5, {
+			...testTheme,
+			selectedPrefix: (text) => `\x1b[38;5;111m${text}\x1b[0m`,
+			selectedText: (text) => `\x1b[7m${text}\x1b[0m`,
+		});
+
+		const [row = ""] = list.render(40);
+		assert.ok(row.includes("› "));
+		assert.ok(row.includes("\x1b[7m"));
+		assert.ok(row.endsWith("\x1b[0m"));
+	});
 });

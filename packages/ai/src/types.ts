@@ -141,6 +141,12 @@ export interface StreamOptions {
 	 */
 	sessionId?: string;
 	/**
+	 * Optional provider prompt-cache routing key when it must be separated from
+	 * the transport/session resource identifier. Providers that do not support
+	 * an explicit prompt-cache key ignore it.
+	 */
+	promptCacheKey?: string;
+	/**
 	 * Optional callback for inspecting or replacing provider payloads before sending.
 	 * Return undefined to keep the payload unchanged.
 	 */

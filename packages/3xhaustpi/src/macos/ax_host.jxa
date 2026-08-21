@@ -1,0 +1,230 @@
+ObjC.import("AppKit");
+ObjC.import("ApplicationServices");
+ObjC.import("Foundation");
+
+const systemEvents = Application("System Events");
+const canonicalRoles = {
+	AXButton: "button",
+	AXCheckBox: "button",
+	AXDisclosureTriangle: "button",
+	AXLink: "link",
+	AXTextField: "field",
+	AXTextArea: "field",
+	AXSearchField: "field",
+	AXComboBox: "field",
+	AXMenuItem: "menu-item",
+	AXWindow: "window",
+	AXDialog: "window",
+};
+
+function stdinRequest() {
+	const data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+	const value = ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding));
+	return JSON.parse(String(value));
+}
+
+function safe(read, fallback) {
+	try {
+		const value = read();
+		return value === undefined || value === null ? fallback : value;
+	} catch {
+		return fallback;
+	}
+}
+
+function boundedText(value) {
+	return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 512) : "";
+}
+
+function processForPid(pid) {
+	const processes = systemEvents.applicationProcesses.whose({ unixId: Number(pid) })();
+	if (processes.length !== 1) throw new Error(`Accessibility application is unavailable: ${pid}`);
+	return processes[0];
+}
+
+function elementIdentity(element) {
+	const rawRole = safe(() => element.role(), "");
+	const role = canonicalRoles[rawRole];
+	if (!role) return null;
+	const name =
+		boundedText(safe(() => element.name(), "")) ||
+		boundedText(safe(() => element.description(), "")) ||
+		boundedText(safe(() => element.roleDescription(), ""));
+	return name ? { role, name } : null;
+}
+
+function observe(request) {
+	if (!Boolean($.AXIsProcessTrusted())) {
+		throw new Error("macOS Accessibility permission is required for external Computer Use.");
+	}
+	const process = processForPid(request.target.pid);
+	const limit = Math.max(1, Math.min(512, Number(request.maxElements) || 512));
+	const elements = [];
+	const append = (element, path) => {
+		if (elements.length >= limit) return;
+		const identity = elementIdentity(element);
+		if (identity) elements.push({ ...identity, path });
+	};
+	const windows = safe(() => process.windows(), []);
+	for (let windowIndex = 0; windowIndex < windows.length && elements.length < limit; windowIndex += 1) {
+		const window = windows[windowIndex];
+		append(window, [windowIndex, -1]);
+		const beforeContents = elements.length;
+		const contents = safe(() => window.entireContents(), []);
+		for (let index = 0; index < contents.length && elements.length < limit; index += 1) {
+			append(contents[index], [windowIndex, -2, index]);
+		}
+		if (elements.length - beforeContents <= 3) {
+			let visited = 0;
+			const visit = (element, path, depth) => {
+				if (elements.length >= limit || visited >= 512 || depth > 10) return;
+				visited += 1;
+				append(element, path);
+				const children = safe(() => element.uiElements(), []);
+				for (
+					let childIndex = 0;
+					childIndex < children.length && elements.length < limit && visited < 512;
+					childIndex += 1
+				) {
+					visit(children[childIndex], [...path, childIndex], depth + 1);
+				}
+			};
+			const children = safe(() => window.uiElements(), []);
+			for (let index = 0; index < children.length && elements.length < limit && visited < 512; index += 1) {
+				visit(children[index], [windowIndex, index], 1);
+			}
+		}
+	}
+	return {
+		application: {
+			pid: Number(request.target.pid),
+			name: boundedText(safe(() => process.name(), "")),
+			frontmost: Boolean(safe(() => process.frontmost(), false)),
+		},
+		trusted: true,
+		elements,
+	};
+}
+
+function resolvePath(process, path) {
+	if (!Array.isArray(path) || path.length < 2 || path.length > 17) {
+		throw new Error("Accessibility element path is invalid.");
+	}
+	const windows = safe(() => process.windows(), []);
+	let element = windows[path[0]];
+	if (!element) throw new Error("Accessibility window is unavailable.");
+	if (path[1] === -2) {
+		const contents = safe(() => element.entireContents(), []);
+		element = contents[path[2]];
+		if (!element) throw new Error("Accessibility element path is stale.");
+	} else if (path[1] !== -1) {
+		for (let index = 1; index < path.length; index += 1) {
+			const children = safe(() => element.uiElements(), []);
+			element = children[path[index]];
+			if (!element) throw new Error("Accessibility element path is stale.");
+		}
+	}
+	return element;
+}
+
+function performAction(request) {
+	if (!Boolean($.AXIsProcessTrusted())) {
+		throw new Error("macOS Accessibility permission is required for external Computer Use.");
+	}
+	const process = processForPid(request.target.pid);
+	if (request.coordinateFallback) {
+		if (request.action.action !== "click" || request.action.button !== "left") {
+			throw new Error("macOS coordinate fallback supports approved left clicks only.");
+		}
+		systemEvents.click({ at: [request.action.coordinates.x, request.action.coordinates.y] });
+		return { method: "coordinates" };
+	}
+	const element = resolvePath(process, request.path);
+	const identity = elementIdentity(element);
+	if (!identity || identity.role !== request.expected.role || identity.name !== request.expected.name) {
+		throw new Error("Accessibility element identity changed before action.");
+	}
+	if (request.action.action === "click") {
+		if (request.action.button !== "left") {
+			throw new Error("Semantic accessibility clicks support the left button only.");
+		}
+		const action = safe(
+			() => element.actions().find((candidate) => candidate.name() === "AXPress"),
+			null,
+		);
+		if (!action) throw new Error("Accessibility element does not expose AXPress.");
+		action.perform();
+	} else if (request.action.action === "type") {
+		process.frontmost = true;
+		element.focused = true;
+		element.value = request.action.text;
+	} else if (request.action.action === "key") {
+		const keyCodes = {
+			Enter: 36,
+			Escape: 53,
+			Tab: 48,
+			ArrowUp: 126,
+			ArrowDown: 125,
+			ArrowLeft: 123,
+			ArrowRight: 124,
+		};
+		process.frontmost = true;
+		element.focused = true;
+		systemEvents.keyCode(keyCodes[request.action.key]);
+	} else {
+		const direction = request.action.deltaY >= 0 ? "AXScrollDownByPage" : "AXScrollUpByPage";
+		const fallback = request.action.deltaY >= 0 ? "AXIncrement" : "AXDecrement";
+		const actions = safe(() => element.actions(), []);
+		const action = actions.find((candidate) => {
+			const name = candidate.name();
+			return name === direction || name === fallback;
+		});
+		if (!action) throw new Error("Accessibility element does not expose a semantic scroll action.");
+		const repetitions = Math.max(1, Math.min(12, Math.ceil(Math.abs(request.action.deltaY) / 800)));
+		for (let index = 0; index < repetitions; index += 1) action.perform();
+	}
+	return { method: "accessibility" };
+}
+
+function listApplications() {
+	const applications = $.NSWorkspace.sharedWorkspace.runningApplications.js
+		.map((application) => ({
+			pid: Number(application.processIdentifier),
+			name: boundedText(ObjC.unwrap(application.localizedName)),
+			bundleId: boundedText(ObjC.unwrap(application.bundleIdentifier)),
+			active: Boolean(application.active),
+			activationPolicy: Number(application.activationPolicy),
+			terminated: Boolean(application.terminated),
+		}))
+		.filter(
+			(application) =>
+				application.pid > 0 &&
+				application.name &&
+				application.bundleId &&
+				application.activationPolicy === 0 &&
+				!application.terminated,
+		)
+		.map(({ activationPolicy: _activationPolicy, terminated: _terminated, ...application }) => application)
+		.sort((left, right) => Number(right.active) - Number(left.active) || left.name.localeCompare(right.name))
+		.slice(0, 128);
+	return {
+		platform: "darwin",
+		trusted: Boolean($.AXIsProcessTrusted()),
+		applications,
+	};
+}
+
+function run() {
+	const request = stdinRequest();
+	const result =
+		request.operation === "list"
+			? listApplications()
+			: request.operation === "observe"
+				? observe(request)
+				: request.operation === "perform"
+					? performAction(request)
+					: (() => {
+							throw new Error("Unknown accessibility operation.");
+						})();
+	return JSON.stringify(result);
+}

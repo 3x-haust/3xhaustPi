@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "hooks": [
+    {
+      "id": "notify-complete",
+      "event": "session.completed",
+      "command": "/usr/bin/osascript",
+      "args": [
+        "-e",
+        "display notification \"3xhaustPi task completed\" with title \"3xhaustPi\""
+      ],
+      "enabled": true
+    }
+  ]
+}
