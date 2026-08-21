@@ -30,6 +30,9 @@
     "node": ">=22.19.0"
   },
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/3x-haust/3xhaustPi.git",
