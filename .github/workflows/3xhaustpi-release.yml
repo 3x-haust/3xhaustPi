@@ -29,6 +29,7 @@ jobs:
           node-version: 22.23.1
           cache: npm
       - run: npm ci
+      - run: npm run build --workspace=@3xhaust/semantic-contract
       - run: npm run build --workspace=3xhaustpi
       - run: node packages/3xhaustpi/scripts/build-native-release.mjs --target ${{ matrix.target }} --output artifacts/native
       - uses: actions/upload-artifact@v4
