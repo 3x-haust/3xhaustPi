@@ -429,9 +429,11 @@ async function run(command: Extract<ThreeXhaustCommand, { readonly kind: "run" }
 						signal: hooks.signal,
 						provider: selectedModel.provider,
 						model: selectedModel.model,
+						...(selectedModel.sessionId ? { sessionId: selectedModel.sessionId } : {}),
 						thinkingLevel: "medium",
 					});
 				} catch (error) {
+					if (selectedModel.sessionId) throw error;
 					hooks.onEvent({
 						type: "assistant.message",
 						text: `Agent runtime unavailable, falling back: ${error instanceof Error ? error.message : String(error)}`,

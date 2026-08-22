@@ -65,11 +65,13 @@ async function executeRun(
 			objective: request.objective,
 			...(request.provider ? { provider: request.provider } : {}),
 			...(request.model ? { model: request.model } : {}),
+			...(request.sessionId ? { sessionId: request.sessionId } : {}),
 			...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
 			signal: hooks.signal,
 			onEvent: hooks.onEvent,
 		});
 	} catch (error) {
+		if (request.sessionId) throw error;
 		send({
 			type: "event",
 			event: {

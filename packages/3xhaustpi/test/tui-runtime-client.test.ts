@@ -12,6 +12,7 @@ describe("TUI runtime worker boundary", () => {
 				projectRoot: "/tmp/project",
 				objective: "inspect",
 				selectedModel: { provider: "openai-codex", model: "gpt-5.6-luna" },
+				sessionId: "session_continuation",
 				allowProjectHooks: true,
 			}),
 		).toEqual({
@@ -20,6 +21,7 @@ describe("TUI runtime worker boundary", () => {
 			objective: "inspect",
 			provider: "openai-codex",
 			model: "gpt-5.6-luna",
+			sessionId: "session_continuation",
 			allowProjectHooks: true,
 		});
 	});

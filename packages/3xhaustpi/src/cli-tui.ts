@@ -45,6 +45,7 @@ try {
 					projectRoot: activeProjectRoot,
 					objective,
 					selectedModel,
+					...(selectedModel.sessionId ? { sessionId: selectedModel.sessionId } : {}),
 					...(command.allowProjectHooks ? { allowProjectHooks: true } : {}),
 				}),
 				hooks,

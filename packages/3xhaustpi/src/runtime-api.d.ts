@@ -2,6 +2,7 @@ export interface CodingTaskUsage {
 	readonly input: number | null;
 	readonly output: number | null;
 	readonly cacheRead: number | null;
+	readonly cacheWrite?: number | null;
 }
 
 export interface CodingTaskPatchProposal {

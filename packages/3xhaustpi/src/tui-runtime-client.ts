@@ -16,6 +16,7 @@ export type TuiRuntimeRequest =
 			readonly objective: string;
 			readonly provider?: string;
 			readonly model?: string;
+			readonly sessionId?: string;
 			readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 			readonly allowProjectHooks?: boolean;
 	  }
@@ -30,6 +31,7 @@ export function createTuiRunRequest(input: {
 	readonly projectRoot: string;
 	readonly objective: string;
 	readonly selectedModel: { readonly provider: string; readonly model: string };
+	readonly sessionId?: string;
 	readonly allowProjectHooks?: boolean;
 }): TuiRuntimeRequest {
 	return {
@@ -38,6 +40,7 @@ export function createTuiRunRequest(input: {
 		objective: input.objective,
 		provider: input.selectedModel.provider,
 		model: input.selectedModel.model,
+		...(input.sessionId ? { sessionId: input.sessionId } : {}),
 		...(input.allowProjectHooks ? { allowProjectHooks: true } : {}),
 	};
 }
