@@ -1,6 +1,6 @@
 {
   "name": "3xhaustpi",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Semantic-only local coding runtime and terminal client for 3xhaustPi",
   "type": "module",
   "bin": {
