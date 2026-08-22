@@ -315,7 +315,15 @@ function contextHeaderRail(state: TuiViewState, layout: TuiLayoutContract): stri
 	if (layout.mode === "degraded" || layout.mode === "minimal") {
 		return frameLine(dim(`${sanitizeTerminalText(state.model)}${thinking}`), layout.columns);
 	}
-	const left: string[] = [muted(compactPath(state.projectRoot))];
+	const thinkingSuffix = state.thinkingLevel ? `:${state.thinkingLevel}` : "";
+	const right = `${dim(`(${sanitizeTerminalText(state.provider)})`)} ${text(sanitizeTerminalText(state.model))}${dim(thinkingSuffix)}`;
+	const path = compactPath(state.projectRoot);
+	const pathBudget = Math.max(1, layout.columns - cellWidth(stripAnsi(right)) - 2);
+	const compactedPath =
+		cellWidth(path) <= pathBudget
+			? path
+			: `…/${ellipsizeCells(sanitizeTerminalText(basename(state.projectRoot)), Math.max(1, pathBudget - 2))}`;
+	const left: string[] = [muted(compactedPath)];
 	const used = state.contextTokens;
 	const limit = state.contextLimit ?? 0;
 	if (used !== undefined && limit > 0) {
@@ -323,8 +331,6 @@ function contextHeaderRail(state: TuiViewState, layout: TuiLayoutContract): stri
 	} else if (limit > 0) {
 		left.push(muted(`0/${compactTokens(limit)} (0.0%)`));
 	}
-	const thinkingSuffix = state.thinkingLevel ? `:${state.thinkingLevel}` : "";
-	const right = `${dim(`(${sanitizeTerminalText(state.provider)})`)} ${text(sanitizeTerminalText(state.model))}${dim(thinkingSuffix)}`;
 	// Adaptive fit: keep the mandatory anchors (path + provider/model), then admit
 	// optional segments only while the single-line budget holds.
 	let body = "";
@@ -508,10 +514,9 @@ export function formatTuiStatusLine(
 	return formatTuiActivityLine({ status, detail, queuedCount, activeCount });
 }
 
-export type TuiCtrlCAction = "cancel-active" | "clear-input" | "exit";
+export type TuiCtrlCAction = "clear-input" | "exit";
 
-export function resolveCtrlCAction(inputText: string, activeWork: boolean): TuiCtrlCAction {
-	if (activeWork) return "cancel-active";
+export function resolveCtrlCAction(inputText: string): TuiCtrlCAction {
 	if (inputText) return "clear-input";
 	return "exit";
 }
@@ -1396,24 +1401,8 @@ export async function runTui(input: {
 	};
 	ui.addInputListener((value) => {
 		if (value === "\u0003") {
-			const action = resolveCtrlCAction(
-				editor.getText(),
-				Boolean(activeExecution || desktopOperation || approvalResolve),
-			);
-			if (action === "cancel-active") {
-				canceledActive = true;
-				activeController?.abort();
-				desktopController?.abort();
-				if (approvalResolve) {
-					const resolve = approvalResolve;
-					approvalResolve = undefined;
-					approvalKind = undefined;
-					resolve(false);
-				}
-				phase = "ready";
-				appendText(warning("Canceled active work."));
-				updateChrome();
-			} else if (action === "clear-input") {
+			const action = resolveCtrlCAction(editor.getText());
+			if (action === "clear-input") {
 				editor.setText("");
 				updateChrome();
 			} else {

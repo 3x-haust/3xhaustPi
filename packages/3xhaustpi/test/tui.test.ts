@@ -508,7 +508,8 @@ describe("Pi-native event-driven TUI renderer", () => {
 
 		// Then
 		expect(toolRow).toBeGreaterThanOrEqual(0);
-		expect(answer).toBe(toolRow + 1);
+		expect(answer).toBe(toolRow + 2);
+		expect(output[toolRow + 1]).toBe("");
 		expect(output[answer]).toBe("  The project summary is available.");
 		expect(output.join("\n")).not.toMatch(/^\s*3xhaust\s*$/gmu);
 	});
@@ -720,10 +721,9 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(narrowMetrics).toContain("…");
 	});
 
-	it("exits on one idle Ctrl+C while preserving cancel and clear behavior", () => {
-		expect(resolveCtrlCAction("draft", true)).toBe("cancel-active");
-		expect(resolveCtrlCAction("draft", false)).toBe("clear-input");
-		expect(resolveCtrlCAction("", false)).toBe("exit");
+	it("exits on one empty-composer Ctrl+C even while runtime cleanup remains active", () => {
+		expect(resolveCtrlCAction("draft")).toBe("clear-input");
+		expect(resolveCtrlCAction("")).toBe("exit");
 	});
 
 	it("renders the target prompt band, answer flow, title, activity, and composer", () => {
@@ -749,6 +749,26 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(visibleLines(output).at(-4)).toContain("> 로그인 오류를 조사해");
 		expect(output).not.toMatch(/not implemented|excluded|skipped|구현하지|제외/u);
 	});
+
+	it("compacts a long project path before truncating provider identity", () => {
+		const output = visibleLines(
+			renderTuiFrame(
+				{
+					...state,
+					projectRoot: "/tmp/3xhaustpi-ctrlc-spacing-final-56/project",
+					provider: "fixture-provider",
+					model: "fixture-model",
+				},
+				56,
+				22,
+			),
+		);
+		const context = output.find((line) => stripAnsi(line).includes("fixture-provider"));
+
+		expect(stripAnsi(context ?? "")).toContain("(fixture-provider) fixture-model");
+		expect(cellWidth(stripAnsi(context ?? ""))).toBeLessThanOrEqual(56);
+	});
+
 	it("bounds the transcript viewport and keeps newest chat content above fixed chrome", () => {
 		const noisy = {
 			...state,
@@ -835,6 +855,39 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(lines[user + 1]?.trim()).toBe("");
 		expect(lines[assistant - 1]?.trim()).toBe("");
 		expect(lines[assistant + 1]?.trim()).toBe("");
+	});
+
+	it("collapses persisted trailing newlines into one visual card boundary", () => {
+		const lines = fitTranscriptCards(
+			["You 컨트롤 c 눌러서 tui 나갈 수 있게 해봐 좀\n", "Thought: 1.7s\nInspecting TUI Ctrl+C handling"],
+			80,
+			12,
+		).map((line) => stripAnsi(line));
+		const prompt = lines.findIndex((line) => line.includes("컨트롤 c"));
+		const thought = lines.findIndex((line) => line.includes("Thought:"));
+
+		expect(prompt).toBeGreaterThan(0);
+		expect(thought - prompt).toBe(2);
+		expect(lines[prompt - 1]?.trim()).toBe("");
+		expect(lines[prompt + 1]?.trim()).toBe("");
+	});
+
+	it("keeps one row between work and answer bodies at every supported width", () => {
+		for (const columns of [56, 72, 80, 120]) {
+			const preAnswer = fitTranscriptCards(["tool inspected source", "3xhaust completed answer"], columns, 12).map(
+				(line) => stripAnsi(line),
+			);
+			const preWork = preAnswer.findIndex((line) => line.includes("inspected source"));
+			const answer = preAnswer.findIndex((line) => line.includes("completed answer"));
+			expect(answer - preWork, `${columns}-column pre-answer boundary`).toBe(2);
+
+			const postAnswer = fitTranscriptCards(["3xhaust completed answer", "tool verified output"], columns, 12).map(
+				(line) => stripAnsi(line),
+			);
+			const priorAnswer = postAnswer.findIndex((line) => line.includes("completed answer"));
+			const postWork = postAnswer.findIndex((line) => line.includes("verified output"));
+			expect(postWork - priorAnswer, `${columns}-column post-answer boundary`).toBe(2);
+		}
 	});
 
 	it("keeps the status row quiet while the composer owns input affordance", () => {

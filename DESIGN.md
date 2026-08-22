@@ -172,6 +172,8 @@ or transcript budget.
   answer prose. Compact output drops the leading empty row.
 - Adjacent prompt/answer margins collapse to one visible row; conversation
   bodies never accumulate a two-row gap.
+- Leading and trailing newlines in persisted message text are normalized before
+  card margins are added, so message payload whitespace cannot double a boundary.
 - Runtime telemetry stays in the idle activity row and never enters the
   conversation transcript.
 - Answer prose owns the widest readable measure. Repeated labels, side rails,
@@ -302,9 +304,9 @@ selects the next active sibling; it never leaves a stale target.
 | Runtime state | Transcript | Activity | Composer | Status | Accepted keys / transition |
 | --- | --- | --- | --- | --- | --- |
 | ready | none | latest response telemetry or blank | enabled | none | text submits; `/` opens picker |
-| waiting for model | none | `• Working` | queue enabled | none | `Ctrl+C` cancels wait |
-| assistant streaming | unlabeled answer row | `• Working` | queue enabled | metrics appear when idle | `Ctrl+C` preserves partial output |
-| tool running | muted work row | verb + capability | queue enabled | none | `Ctrl+C` cancels active run |
+| waiting for model | none | `• Working` | queue enabled | none | empty-composer `Ctrl+C` aborts and exits |
+| assistant streaming | unlabeled answer row | `• Working` | queue enabled | metrics appear when idle | empty-composer `Ctrl+C` aborts and exits |
+| tool running | muted work row | verb + capability | queue enabled | none | empty-composer `Ctrl+C` aborts and exits |
 | agent active | emphasized work row | agent action | queue enabled | none | durable work row only |
 | approval requested | attached approval row | explicit subject + keys | disabled | warning health | `y` approve, `n` reject, `Esc` reject |
 | queued follow-up | no duplicate transcript row | queued count | enabled | none | `/queue`, `/clear` |
@@ -333,9 +335,9 @@ Terminal rendering is event-driven; no decorative animation is introduced.
 - Differential redraws must not scroll fixed chrome.
 - Running work may use a subtle changing glyph only alongside a text state.
 - Completed, failed, and approval states update immediately on exact events.
-- First `Ctrl+C` during active work cancels it and preserves the session/UI.
-- Idle `Ctrl+C` clears non-empty composer input; one idle `Ctrl+C` on an empty
-  composer exits. `/exit` performs the same deterministic shutdown.
+- `Ctrl+C` clears a non-empty composer. With an empty composer it aborts active
+  work, reaps the runtime worker, and exits in one keypress with code 0.
+- `/exit` performs the same deterministic shutdown.
 - `Escape` closes a picker or rejects the currently focused transient surface;
   it never silently exits.
 - Composer owns default focus. Pickers temporarily capture focus and restore it

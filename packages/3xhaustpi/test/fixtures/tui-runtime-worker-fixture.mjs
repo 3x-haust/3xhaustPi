@@ -3,6 +3,17 @@ let approvalPending = false;
 process.on("message", (message) => {
 	if (message?.type === "start") {
 		if (message.request?.objective === "wait") return;
+		if (message.request?.objective === "result-with-open-handle") {
+			process.send?.({ type: "result", available: true, result: { pid: process.pid } });
+			setInterval(() => {}, 60_000);
+			return;
+		}
+		if (message.request?.objective === "result-ignoring-sigterm") {
+			process.on("SIGTERM", () => {});
+			process.send?.({ type: "result", available: true, result: { pid: process.pid } });
+			setInterval(() => {}, 60_000);
+			return;
+		}
 		process.send?.({
 			type: "event",
 			event: {

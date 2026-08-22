@@ -62,7 +62,7 @@ function isWorkerMessage(value: unknown): value is RuntimeWorkerMessage {
 export async function runTuiRuntime(
 	request: TuiRuntimeRequest,
 	hooks: TuiRuntimeHooks,
-	options: { readonly workerPath?: string } = {},
+	options: { readonly workerPath?: string; readonly terminationGraceMs?: number } = {},
 ): Promise<unknown> {
 	return await new Promise((resolve, reject) => {
 		const child = fork(options.workerPath ?? defaultWorkerPath, [], {
@@ -74,13 +74,27 @@ export async function runTuiRuntime(
 		let stdout = "";
 		let settled = false;
 		let abortTimer: NodeJS.Timeout | undefined;
-		const finish = (error?: Error, value?: unknown) => {
+		let completion:
+			| { readonly kind: "error"; readonly error: Error }
+			| { readonly kind: "result"; readonly value: unknown }
+			| undefined;
+		const settle = (
+			next: { readonly kind: "error"; readonly error: Error } | { readonly kind: "result"; readonly value: unknown },
+		) => {
 			if (settled) return;
 			settled = true;
 			if (abortTimer) clearTimeout(abortTimer);
 			hooks.signal.removeEventListener("abort", abort);
-			if (error) reject(error);
-			else resolve(value);
+			if (next.kind === "error") reject(next.error);
+			else resolve(next.value);
+		};
+		const finish = (error?: Error, value?: unknown) => {
+			if (settled || completion) return;
+			completion = error ? { kind: "error", error } : { kind: "result", value };
+			child.kill("SIGTERM");
+			if (!abortTimer) {
+				abortTimer = setTimeout(() => child.kill("SIGKILL"), options.terminationGraceMs ?? 2_000);
+			}
 		};
 		const abort = () => {
 			if (child.connected) child.send({ type: "abort" });
@@ -122,11 +136,18 @@ export async function runTuiRuntime(
 			}
 			finish(undefined, message.available ? message.result : undefined);
 		});
-		child.once("error", (error) => finish(error));
+		child.once("error", (error) => settle({ kind: "error", error }));
 		child.once("exit", (code, signal) => {
 			if (settled) return;
+			if (completion) {
+				settle(completion);
+				return;
+			}
 			const detail = (stderr || stdout).trim().slice(-2_048);
-			finish(new Error(detail || `TUI runtime worker exited before completion (${signal ?? code ?? "unknown"}).`));
+			settle({
+				kind: "error",
+				error: new Error(detail || `TUI runtime worker exited before completion (${signal ?? code ?? "unknown"}).`),
+			});
 		});
 		hooks.signal.addEventListener("abort", abort, { once: true });
 		if (hooks.signal.aborted) abort();
