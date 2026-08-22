@@ -484,6 +484,20 @@ export function formatTuiActivityLine(state: TuiActivityState, columns = 120): s
 	return line;
 }
 
+export function retainTuiActivityDetail(current: string, next: string | undefined): string {
+	return next ?? current;
+}
+
+export function updateTuiCapabilityActivity(
+	active: readonly string[],
+	capability: string,
+	transition: "started" | "completed",
+): string[] {
+	if (transition === "started") return [...active, capability];
+	const completedIndex = active.lastIndexOf(capability);
+	return completedIndex === -1 ? [...active] : active.filter((_, index) => index !== completedIndex);
+}
+
 function baseTuiActivityLine(state: TuiActivityState, columns: number): string {
 	const queuedCount = state.queuedCount ?? 0;
 	const activeCount = state.activeCount ?? 0;
@@ -683,6 +697,8 @@ export async function runTui(input: {
 		scrollOffset.value = 0;
 		detachedNewCount = 0;
 	};
+	let activityDetail = "";
+	let activeCapabilities: readonly string[] = [];
 	const baseEditorHandleInput = editor.handleInput.bind(editor);
 	editor.handleInput = (data: string) => {
 		if (data === TUI_SCROLL_KEYS.pageUp) {
@@ -705,12 +721,13 @@ export async function runTui(input: {
 	const activeTaskCount = () => (activeExecution ? 1 : 0) + (desktopOperation ? 1 : 0);
 	const hasResumableChat = () =>
 		workspace.chats.some((chat) => chat.status === "running" || chat.status === "paused" || chat.status === "queued");
-	const updateChrome = (detail = "") => {
+	const updateChrome = (detail?: string) => {
+		activityDetail = retainTuiActivityDetail(activityDetail, detail);
 		status.setText(
 			formatTuiActivityLine(
 				{
 					status: phase,
-					detail,
+					detail: activityDetail,
 					queuedCount: queuedRequests.length,
 					activeCount: activeTaskCount(),
 					resumable: hasResumableChat(),
@@ -730,7 +747,7 @@ export async function runTui(input: {
 	const workAnimationTimer = workMotionEnabled
 		? setInterval(() => {
 				if (phase !== "running" && activeTaskCount() === 0) return;
-				workAnimationFrame = (workAnimationFrame + 1) % 8;
+				workAnimationFrame += 1;
 				updateChrome();
 			}, 120)
 		: undefined;
@@ -805,13 +822,17 @@ export async function runTui(input: {
 				latestCacheHitRatio = undefined;
 			}
 		} else if (event.type === "capability.started") {
+			activeCapabilities = updateTuiCapabilityActivity(activeCapabilities, event.capability, "started");
 			updateChrome(`${event.capability}…`);
 		} else if (event.type === "capability.completed") {
+			activeCapabilities = updateTuiCapabilityActivity(activeCapabilities, event.capability, "completed");
 			appendText(
 				`${event.success ? success("✓") : failure("×")} ${text(event.capability)}  ${muted(
 					`${event.durationMs.toFixed(1)} ms · ${event.summary}`,
 				)}`,
 			);
+			const currentCapability = activeCapabilities.at(-1);
+			updateChrome(currentCapability ? `${currentCapability}…` : "");
 		} else if (event.type === "patch.proposed") {
 			refreshWorkspace();
 			phase = "awaiting-approval";
@@ -845,6 +866,7 @@ export async function runTui(input: {
 		latestMetricsLine = undefined;
 		activeTuiRequestId = request?.id;
 		activeTuiRequestHandedOff = false;
+		activeCapabilities = [];
 		assistantFlow.reset();
 		activeController = new AbortController();
 		if (resume) appendUser(`/resume ${resumeSessionId === "" ? "" : resumeSessionId.slice(-8)}`.trim());
@@ -885,8 +907,9 @@ export async function runTui(input: {
 			approvalResolve = undefined;
 			approvalKind = undefined;
 			canceledActive = false;
+			activeCapabilities = [];
 			refreshQueue();
-			updateChrome();
+			updateChrome("");
 		}
 	};
 
@@ -907,7 +930,7 @@ export async function runTui(input: {
 		activeExecution = execution;
 		void execution.finally(() => {
 			if (activeExecution === execution) activeExecution = undefined;
-			updateChrome();
+			updateChrome("");
 			if (!active) finish();
 			else drainQueue();
 		});
@@ -918,7 +941,7 @@ export async function runTui(input: {
 		activeExecution = execution;
 		void execution.finally(() => {
 			if (activeExecution === execution) activeExecution = undefined;
-			updateChrome();
+			updateChrome("");
 			if (!active) finish();
 			else drainQueue();
 		});
@@ -1134,7 +1157,7 @@ export async function runTui(input: {
 				desktopController = undefined;
 				desktopOperation = undefined;
 				if (phase === "error") phase = "ready";
-				updateChrome();
+				updateChrome("");
 				if (!active && !activeExecution) finish();
 			});
 		desktopOperation = operation;
@@ -1441,7 +1464,7 @@ export async function runTui(input: {
 			} else if (approved) {
 				appendText(success("✓ Computer action approved"));
 			}
-			updateChrome();
+			updateChrome("");
 			resolve(approved);
 			return { consume: true };
 		}

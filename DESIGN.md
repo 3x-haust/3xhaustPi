@@ -144,7 +144,7 @@ or transcript budget.
 | Surface | Wide/full | Compact | Minimal/degraded |
 | --- | --- | --- | --- |
 | title | product, project, model | product and project | product |
-| user prompt | empty tint row, content, empty tint row | empty tint row, content, empty tint row | content row only |
+| user prompt | empty tint row, content, neutral separator row | empty tint row, content, neutral separator row | content row only |
 | thought | duration and work summary | duration | hide before answer |
 | answer | readable capped measure | terminal measure | terminal measure |
 | metrics | throughput, cache, duration | throughput, cache, duration when they fit | duration |
@@ -168,12 +168,15 @@ or transcript budget.
 - Submitted prompts are full-width `prompt-surface` bands. The surface, not a
   speaker name, identifies the user role. `You`, `User`, `3xhaust`, and generic
   assistant labels never render.
-- Wide and compact prompt bands use an empty surface row above and below the
-  prompt. Minimal and degraded modes may collapse these rows before content.
+- Wide and compact prompt bands use an empty tinted row above the prompt and a
+  neutral terminal-background separator below it. Minimal and degraded modes
+  may collapse these rows before content.
 - Wide and compact assistant output uses one terminal-background row above and
   below bright answer prose. Minimal output may collapse the leading row.
 - Adjacent prompt/answer margins collapse to one visible row; conversation
   bodies never accumulate a two-row gap.
+- When a tinted prompt margin meets pending work or an answer, collapse the
+  tinted row and keep one neutral terminal-background row as the separator.
 - Prompt, durable work, answer, and response telemetry bodies use the same
   one-row semantic boundary. Work rows never touch answer prose, and telemetry
   never touches the final answer body.
@@ -338,9 +341,11 @@ redesign; the durable work row is the only agent detail surface.
 ### Timing
 
 Terminal rendering remains event-driven except for one state-signaling motion:
-active work advances a grayscale luminance sweep every 120 ms. The sweep uses
-the neutral ramp `text-ghost → disabled → text-muted → text-secondary` and
-never changes glyphs, width, or row ownership.
+active work advances one `text-primary` glyph every 120 ms across otherwise
+`disabled` gray text. The highlight skips whitespace, so exactly one visible
+white glyph is present in every frame. It never changes glyphs, width, or row
+ownership. Timer-only redraws retain the current capability/detail text until
+an exact completion or state transition clears it.
 
 ### Rules
 

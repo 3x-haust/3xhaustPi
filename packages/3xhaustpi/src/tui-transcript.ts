@@ -154,7 +154,7 @@ function messageCard(value: string, columns: number): string[] {
 		const rows = physicalLines
 			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
 			.map((line) => promptSurfaceLine(`${bodyIndent}${line}`, columns));
-		if (columns >= 40) return [promptSurfaceLine("", columns), ...rows, promptSurfaceLine("", columns)];
+		if (columns >= 40) return [promptSurfaceLine("", columns), ...rows, ""];
 		return rows;
 	}
 	if (role === "threeXhaust") {
@@ -247,9 +247,19 @@ function transcriptCards(entries: readonly string[], columns: number): string[][
 		) {
 			pendingRows.pop();
 		}
+		const previousCard = cards.at(-1);
+		const previousMargin = previousCard?.at(-1);
+		if (
+			pendingRows.length > 0 &&
+			previousCard &&
+			previousMargin !== undefined &&
+			previousMargin !== "" &&
+			stripAnsi(previousMargin).trim().length === 0
+		) {
+			previousCard[previousCard.length - 1] = "";
+		}
 		const renderedCard = pendingRows.length > 0 ? [...pendingRows, ...card] : card;
 		if (template.role === "threeXhaust") pendingActivity = [];
-		const previousCard = cards.at(-1);
 		const previousGap = previousCard?.at(-1);
 		const nextGap = renderedCard.at(0);
 		if (
@@ -259,7 +269,7 @@ function transcriptCards(entries: readonly string[], columns: number): string[][
 			stripAnsi(previousGap).trim().length === 0 &&
 			stripAnsi(nextGap).trim().length === 0
 		) {
-			if (previousGap === "" && nextGap !== "") previousCard.pop();
+			if (nextGap === "") previousCard.pop();
 			else renderedCard.shift();
 		}
 		cards.push(renderedCard);
