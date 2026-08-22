@@ -22,6 +22,7 @@ import {
 	type TuiViewState,
 	transcriptViewportRows,
 } from "../src/tui.ts";
+import { fitTranscriptCards } from "../src/tui-transcript.ts";
 
 const state: TuiViewState = {
 	projectRoot: "/tmp/project",
@@ -243,22 +244,53 @@ describe("Pi-native event-driven TUI renderer", () => {
 	it("formats only measured response telemetry without inventing values", () => {
 		expect(
 			formatResponseMetrics({
+				input: 668,
+				output: 7,
+				cacheRead: 3_584,
+				cacheReadHighWater: 3_584,
+				durationMs: 500,
+			}),
+		).toBe("TPS 14.0 tok/s. Cache hit 100.0%, 0.5s");
+		expect(
+			formatResponseMetrics({
+				input: 0,
+				output: 50,
+				cacheRead: 1_000,
+				durationMs: 500,
+			}),
+		).toBe("TPS 100.0 tok/s. Cache hit 100.0%, 0.5s");
+		expect(
+			formatResponseMetrics({
+				input: 1_000,
+				output: 50,
+				cacheRead: 0,
+				durationMs: 500,
+			}),
+		).toBe("TPS 100.0 tok/s, 0.5s");
+		expect(
+			formatResponseMetrics({
+				input: 1_000,
+				output: 50,
+				cacheRead: 250,
+				durationMs: 500,
+			}),
+		).toBe("TPS 100.0 tok/s. Cache hit 20.0%, 0.5s");
+		expect(
+			formatResponseMetrics({
 				input: 1_000,
 				output: 79,
 				cacheRead: 250,
 				durationMs: 5_000,
 			}),
-		).toBe("Stats: TPS 15.8 tok/s · Cache hit 25.0% · 5.0s");
+		).toBe("TPS 15.8 tok/s. Cache hit 20.0%, 5.0s");
 		expect(
 			formatResponseMetrics({
-				// Providers that exclude cached tokens from `input`: nearly all prompt
-				// tokens were cache reads, so the hit ratio saturates at 100%.
 				input: 500,
 				output: 79,
 				cacheRead: 8_000,
 				durationMs: 5_000,
 			}),
-		).toBe("Stats: TPS 15.8 tok/s · Cache hit 100.0% · 5.0s");
+		).toBe("TPS 15.8 tok/s. Cache hit 94.1%, 5.0s");
 		expect(
 			formatResponseMetrics({
 				input: 1_000,
@@ -266,10 +298,8 @@ describe("Pi-native event-driven TUI renderer", () => {
 				cacheRead: 6_417,
 				durationMs: 5_000,
 			}),
-		).toBe("Stats: TPS 15.8 tok/s · Cache hit 100.0% · 5.0s");
-		expect(formatResponseMetrics({ input: null, output: null, cacheRead: null, durationMs: 1_200 })).toBe(
-			"Stats: 1.2s",
-		);
+		).toBe("TPS 15.8 tok/s. Cache hit 86.5%, 5.0s");
+		expect(formatResponseMetrics({ input: null, output: null, cacheRead: null, durationMs: 1_200 })).toBe("1.2s");
 	});
 
 	it("keeps an oversized assistant answer visible when response metrics fit", () => {
@@ -432,6 +462,26 @@ describe("Pi-native event-driven TUI renderer", () => {
 		expect(output[toolRow]).toMatch(/^ {2}✓ readRanges/u);
 		expect(output[answer]).toBe("  The expired session is rejected before token rotation.");
 		expect(output.join("\n")).not.toMatch(/[├└]|^\s*(?:You|3xhaust)\s*$/gmu);
+	});
+
+	it("collapses adjacent wide conversation margins to one row", () => {
+		// Given
+		const output = fitTranscriptCards(
+			["You 안녕", "3xhaust 안녕하세요.", "You 안녕?", "3xhaust 반갑습니다."],
+			80,
+			20,
+		).map((line) => stripAnsi(line));
+
+		// When
+		const firstPrompt = output.findIndex((line) => line.includes("안녕"));
+		const firstAnswer = output.findIndex((line) => line.includes("안녕하세요."));
+		const secondPrompt = output.findIndex((line) => line.includes("안녕?"));
+		const secondAnswer = output.findIndex((line) => line.includes("반갑습니다."));
+
+		// Then
+		expect(firstAnswer - firstPrompt).toBe(2);
+		expect(secondPrompt - firstAnswer).toBe(2);
+		expect(secondAnswer - secondPrompt).toBe(2);
 	});
 
 	it("places pre-response work immediately before final assistant prose", () => {
@@ -654,14 +704,26 @@ describe("Pi-native event-driven TUI renderer", () => {
 			stripAnsi(formatTuiActivityLine({ status: "ready", activeCount: 0, queuedCount: 4, resumable: true })),
 		).toContain("• Paused (/resume to continue) · 4 queued");
 		expect(stripAnsi(formatTuiActivityLine({ status: "ready", queuedCount: 4 }))).toBe("• Queued (4 waiting)");
-		expect(stripAnsi(formatTuiActivityLine({ status: "ready" }))).toBe("• Ready");
+		expect(stripAnsi(formatTuiActivityLine({ status: "ready" }))).toBe("");
+		expect(
+			stripAnsi(
+				formatTuiActivityLine({
+					status: "ready",
+					metrics: "TPS 32.5 tok/s. Cache hit 99.6%, 541.1s",
+				}),
+			),
+		).toBe("TPS 32.5 tok/s. Cache hit 99.6%, 541.1s");
+		const narrowMetrics = stripAnsi(
+			formatTuiActivityLine({ status: "ready", metrics: "TPS 32.5 tok/s. Cache hit 99.6%, 541.1s" }, 24),
+		);
+		expect(cellWidth(narrowMetrics)).toBeLessThanOrEqual(24);
+		expect(narrowMetrics).toContain("…");
 	});
 
-	it("defines Ctrl+C as active cancel, idle clear, then consecutive-key exit arm", () => {
-		expect(resolveCtrlCAction("draft", true, false)).toBe("cancel-active");
-		expect(resolveCtrlCAction("draft", false, false)).toBe("clear-input");
-		expect(resolveCtrlCAction("", false, false)).toBe("arm-exit");
-		expect(resolveCtrlCAction("", false, true)).toBe("exit");
+	it("exits on one idle Ctrl+C while preserving cancel and clear behavior", () => {
+		expect(resolveCtrlCAction("draft", true)).toBe("cancel-active");
+		expect(resolveCtrlCAction("draft", false)).toBe("clear-input");
+		expect(resolveCtrlCAction("", false)).toBe("exit");
 	});
 
 	it("renders the target prompt band, answer flow, title, activity, and composer", () => {
@@ -763,8 +825,20 @@ describe("Pi-native event-driven TUI renderer", () => {
 		}
 	});
 
+	it("gives full-density user and assistant cards symmetric vertical padding", () => {
+		const lines = fitTranscriptCards(["You 안녕", "3xhaustPi 안녕하세요."], 80, 12).map((line) => stripAnsi(line));
+		const user = lines.findIndex((line) => line.includes("안녕") && !line.includes("안녕하세요"));
+		const assistant = lines.findIndex((line) => line.includes("안녕하세요"));
+		expect(user).toBeGreaterThan(0);
+		expect(assistant - user).toBe(2);
+		expect(lines[user - 1]?.trim()).toBe("");
+		expect(lines[user + 1]?.trim()).toBe("");
+		expect(lines[assistant - 1]?.trim()).toBe("");
+		expect(lines[assistant + 1]?.trim()).toBe("");
+	});
+
 	it("keeps the status row quiet while the composer owns input affordance", () => {
-		expect(stripAnsi(formatTuiStatusLine("ready", "", 0))).toBe("• Ready");
+		expect(stripAnsi(formatTuiStatusLine("ready", "", 0))).toBe("");
 		expect(stripAnsi(formatTuiStatusLine("running", "planning…", 1))).toContain(
 			"• Working (planning… · esc to interrupt)",
 		);

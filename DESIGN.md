@@ -162,15 +162,18 @@ or transcript budget.
 
 ### Transcript Feed
 
-- Semantic roles: `prompt`, `thought`, `work`, `answer`, `metrics`, `system`.
+- Semantic roles: `prompt`, `work`, `answer`, `system`.
 - Submitted prompts are full-width `prompt-surface` bands. The surface, not a
   speaker name, identifies the user role. `You`, `User`, `3xhaust`, and generic
   assistant labels never render.
 - Wide prompt bands use an empty surface row above and below the prompt.
   Compact bands retain the same tint while dropping empty rows before content.
-- Assistant output is open prose on the terminal background. Its sequence is
-  muted italic thought timing, emphasized work summary when available, bright
-  answer prose, then subdued response metrics.
+- Wide assistant output uses one terminal-background row above and below bright
+  answer prose. Compact output drops the leading empty row.
+- Adjacent prompt/answer margins collapse to one visible row; conversation
+  bodies never accumulate a two-row gap.
+- Runtime telemetry stays in the idle activity row and never enters the
+  conversation transcript.
 - Answer prose owns the widest readable measure. Repeated labels, side rails,
   and chat bubbles are forbidden.
 - System messages are quieter than conversation and have no repeated `system`
@@ -190,27 +193,24 @@ or transcript budget.
 ```text
 [full-width tinted user prompt]
 
-Thought: 1.2s
-Planning the response
-
 Bright assistant answer with no speaker label.
 
-TPS 15.8 tok/s · Cache hit 0.0% · 4.5s
+TPS 15.8 tok/s. Cache hit 99.6%, 4.5s
 ```
 
 - Prompt tint is the only large-area surface in the transcript.
-- Thought and metrics are visibly quieter than the answer.
-- Durable work results may appear between thought and answer; transient progress
-  stays in the activity row.
+- Runtime telemetry stays out of the conversation transcript.
+- Durable work results may appear before the answer; transient progress stays in
+  the activity row.
 
 #### Row Templates
 
 | Event | Durable transcript form |
 | --- | --- |
 | user message | full-width tinted prompt band, no speaker label |
-| model completed | muted italic `Thought: <duration>` |
+| model completed | no transcript row; telemetry updates the idle activity row |
 | assistant streaming | bright unlabeled partial prose updated in place |
-| assistant complete | bright unlabeled prose followed by metrics |
+| assistant complete | bright unlabeled prose |
 | tool pending/running | muted work row with explicit verb and state |
 | tool success | muted `✓ capability · duration · summary` |
 | tool failure | failure `× capability · duration · summary` |
@@ -243,7 +243,8 @@ output is capped at 100 lines and ends with an omitted-line count.
 
 - Lives immediately above the composer.
 - Owns current ephemeral execution state; no other rail repeats it.
-- Ready: quiet `• Ready`; command discovery stays behind `/help`.
+- Ready before the first response: blank; command discovery stays behind `/help`.
+- Ready after a response: measured `TPS`, cache-hit ratio, and duration.
 - Running: `• Working (<detail> · esc to interrupt)`, never spinner-only.
 - Review: approval action and key choices.
 - Queued: count remains visible without flooding the transcript.
@@ -258,7 +259,7 @@ The single row resolves simultaneous state in this order:
 3. current foreground capability
 4. active agents/tools aggregate
 5. queued follow-ups
-6. ready
+6. latest response telemetry, otherwise blank
 
 Within one priority, show the latest foreground target. A completion immediately
 selects the next active sibling; it never leaves a stale target.
@@ -284,7 +285,13 @@ selects the next active sibling; it never leaves a stale target.
 
 ### Response Metrics
 
-- Metrics follow the answer instead of occupying a permanent footer.
+- Metrics occupy the idle activity row instead of the conversation transcript.
+- TPS and duration use the sum of assistant `message_start` → `message_end`
+  intervals. Tool execution and idle queue time are excluded.
+- Cache hit measures retained reusable prefix: provider-reported cached input
+  tokens divided by the warm session's cache-read high-water mark. Newly
+  appended user/assistant suffix tokens are not cache misses. Cold turns omit
+  the cache field instead of displaying a meaningless `0.0%`.
 - Full/wide: throughput, cache-hit ratio, and duration when measured.
 - Compact: cache-hit ratio and duration.
 - Minimal/degraded: duration only.
@@ -294,9 +301,9 @@ selects the next active sibling; it never leaves a stale target.
 
 | Runtime state | Transcript | Activity | Composer | Status | Accepted keys / transition |
 | --- | --- | --- | --- | --- | --- |
-| ready | none | `• Ready` | enabled | none | text submits; `/` opens picker |
-| waiting for model | thought row when measured | `• Working` | queue enabled | none | `Ctrl+C` cancels wait |
-| assistant streaming | unlabeled answer row | `• Working` | queue enabled | metrics follow answer | `Ctrl+C` preserves partial output |
+| ready | none | latest response telemetry or blank | enabled | none | text submits; `/` opens picker |
+| waiting for model | none | `• Working` | queue enabled | none | `Ctrl+C` cancels wait |
+| assistant streaming | unlabeled answer row | `• Working` | queue enabled | metrics appear when idle | `Ctrl+C` preserves partial output |
 | tool running | muted work row | verb + capability | queue enabled | none | `Ctrl+C` cancels active run |
 | agent active | emphasized work row | agent action | queue enabled | none | durable work row only |
 | approval requested | attached approval row | explicit subject + keys | disabled | warning health | `y` approve, `n` reject, `Esc` reject |
@@ -327,9 +334,8 @@ Terminal rendering is event-driven; no decorative animation is introduced.
 - Running work may use a subtle changing glyph only alongside a text state.
 - Completed, failed, and approval states update immediately on exact events.
 - First `Ctrl+C` during active work cancels it and preserves the session/UI.
-- Idle `Ctrl+C` clears non-empty composer input; a second idle `Ctrl+C` on an
-  empty composer exits. The exit arm is consecutive-key state, not a timer: any
-  non-`Ctrl+C` input disarms it. `/exit` always performs deterministic shutdown.
+- Idle `Ctrl+C` clears non-empty composer input; one idle `Ctrl+C` on an empty
+  composer exits. `/exit` performs the same deterministic shutdown.
 - `Escape` closes a picker or rejects the currently focused transient surface;
   it never silently exits.
 - Composer owns default focus. Pickers temporarily capture focus and restore it

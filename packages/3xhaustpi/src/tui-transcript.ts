@@ -73,26 +73,20 @@ export function formatTranscriptEntry(value: string): TuiTranscriptTemplate {
 export interface TranscriptFeedHooks {
 	readonly push: (entry: string) => number;
 	readonly replace: (index: number, entry: string) => void;
-	readonly insert: (index: number, entry: string) => void;
 }
 
 /**
  * Owns the assistant response flow in the transcript: streaming deltas update
- * one unlabeled prose entry in place; thought timing lands above the answer and
- * response metrics below it, per the DESIGN.md response grammar.
+ * one unlabeled prose entry in place. Runtime telemetry belongs in the status
+ * rail rather than the conversation transcript.
  */
 export class AssistantTranscriptFlow {
 	readonly #hooks: TranscriptFeedHooks;
 	#streamIndex: number | undefined;
 	#streamed = "";
-	#metrics: string | undefined;
 
-	constructor(
-		push: TranscriptFeedHooks["push"],
-		replace: TranscriptFeedHooks["replace"],
-		insert: TranscriptFeedHooks["insert"],
-	) {
-		this.#hooks = { push, replace, insert };
+	constructor(push: TranscriptFeedHooks["push"], replace: TranscriptFeedHooks["replace"]) {
+		this.#hooks = { push, replace };
 	}
 
 	delta(value: string): void {
@@ -103,27 +97,10 @@ export class AssistantTranscriptFlow {
 		else this.#hooks.replace(this.#streamIndex, entry);
 	}
 
-	noteThought(label: string): void {
-		if (this.#streamIndex !== undefined) {
-			this.#hooks.insert(this.#streamIndex, label);
-			this.#streamIndex += 1;
-			return;
-		}
-		this.#hooks.push(label);
-	}
-
-	noteMetrics(line: string): void {
-		this.#metrics = line;
-	}
-
 	complete(text: string): void {
 		const entry = `${ASSISTANT_DISPLAY_NAME} ${text}`;
 		if (this.#streamIndex !== undefined) this.#hooks.replace(this.#streamIndex, entry);
 		else this.#hooks.push(entry);
-		if (this.#metrics !== undefined) {
-			this.#hooks.push(this.#metrics);
-			this.#metrics = undefined;
-		}
 		this.#streamIndex = undefined;
 		this.#streamed = "";
 	}
@@ -131,7 +108,6 @@ export class AssistantTranscriptFlow {
 	reset(): void {
 		this.#streamIndex = undefined;
 		this.#streamed = "";
-		this.#metrics = undefined;
 	}
 }
 
@@ -187,7 +163,7 @@ function messageCard(value: string, columns: number): string[] {
 			.split("\n")
 			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
 			.map((line) => text(`${bodyIndent}${line}`));
-		return [...rows, ""];
+		return columns >= 80 ? ["", ...rows, ""] : [...rows, ""];
 	}
 	if (role === "thought") {
 		const contentWidth = Math.max(1, columns - cellWidth(gutter));
@@ -268,6 +244,19 @@ function transcriptCards(entries: readonly string[], columns: number): string[][
 		const renderedCard =
 			template.role === "threeXhaust" && pendingActivity.length > 0 ? [...pendingActivity.flat(), ...card] : card;
 		if (template.role === "threeXhaust") pendingActivity = [];
+		const previousCard = cards.at(-1);
+		const previousGap = previousCard?.at(-1);
+		const nextGap = renderedCard.at(0);
+		if (
+			previousCard &&
+			previousGap !== undefined &&
+			nextGap !== undefined &&
+			stripAnsi(previousGap).trim().length === 0 &&
+			stripAnsi(nextGap).trim().length === 0
+		) {
+			if (previousGap === "" && nextGap !== "") previousCard.pop();
+			else renderedCard.shift();
+		}
 		cards.push(renderedCard);
 		activeAssistantCard = template.role === "threeXhaust" ? cards.length - 1 : undefined;
 	}
@@ -290,7 +279,7 @@ export function fitTranscriptCards(entries: readonly string[], columns: number, 
 			continue;
 		}
 		if (visibleCards.length === 0) {
-			const cardHasTrailingGap = card.at(-1) === "";
+			const cardHasTrailingGap = stripAnsi(card.at(-1) ?? "").trim().length === 0;
 			const hasTrailingGap = cardHasTrailingGap && remaining > 2;
 			const contentEnd = cardHasTrailingGap ? card.length - 1 : card.length;
 			const anchorIndex = card.findIndex((line, candidateIndex) => {

@@ -147,6 +147,8 @@ export interface TuiResponseMetrics {
 	readonly input: number | null;
 	readonly output: number | null;
 	readonly cacheRead: number | null;
+	readonly cacheWrite?: number | null;
+	readonly cacheReadHighWater?: number;
 	readonly durationMs: number;
 }
 
@@ -155,16 +157,26 @@ function seconds(value: number): string {
 }
 
 export function formatResponseMetrics(metrics: TuiResponseMetrics): string {
-	const parts: string[] = [];
+	let throughput: string | undefined;
 	if (metrics.output !== null && metrics.durationMs > 0) {
-		parts.push(`TPS ${(metrics.output / (metrics.durationMs / 1_000)).toFixed(1)} tok/s`);
+		throughput = `TPS ${(metrics.output / (metrics.durationMs / 1_000)).toFixed(1)} tok/s`;
 	}
-	if (metrics.input !== null && metrics.input > 0 && metrics.cacheRead !== null) {
-		const ratio = Math.min(1, Math.max(0, metrics.cacheRead / Math.max(metrics.input, metrics.cacheRead)));
-		parts.push(`Cache hit ${(ratio * 100).toFixed(1)}%`);
+	let cache: string | undefined;
+	if (metrics.input !== null && metrics.cacheRead !== null && metrics.cacheRead > 0) {
+		const denominator =
+			metrics.cacheReadHighWater && metrics.cacheReadHighWater > 0
+				? metrics.cacheReadHighWater
+				: metrics.input + metrics.cacheRead + (metrics.cacheWrite ?? 0);
+		if (denominator > 0) {
+			const ratio = Math.min(1, Math.max(0, metrics.cacheRead / denominator));
+			cache = `Cache hit ${(ratio * 100).toFixed(1)}%`;
+		}
 	}
-	parts.push(seconds(metrics.durationMs));
-	return `Stats: ${parts.join(" · ")}`;
+	const duration = seconds(metrics.durationMs);
+	if (throughput && cache) return `${throughput}. ${cache}, ${duration}`;
+	if (throughput) return `${throughput}, ${duration}`;
+	if (cache) return `${cache}, ${duration}`;
+	return duration;
 }
 
 export interface TuiCommand {
@@ -306,10 +318,6 @@ function contextHeaderRail(state: TuiViewState, layout: TuiLayoutContract): stri
 	const left: string[] = [muted(compactPath(state.projectRoot))];
 	const used = state.contextTokens;
 	const limit = state.contextLimit ?? 0;
-	if (state.cacheHitRatio !== undefined) {
-		const label = `CH${(Math.min(1, Math.max(0, state.cacheHitRatio)) * 100).toFixed(1)}%`;
-		left.push(state.cacheHitRatio >= 0.9 ? success(label) : warning(label));
-	}
 	if (used !== undefined && limit > 0) {
 		left.push(text(`${compactTokens(used)}/${compactTokens(limit)} (${((used / limit) * 100).toFixed(1)}%)`));
 	} else if (limit > 0) {
@@ -454,6 +462,7 @@ export interface TuiActivityState {
 	readonly resumable?: boolean;
 	readonly canceled?: boolean;
 	readonly detachedNew?: number;
+	readonly metrics?: string;
 }
 
 function activityDetail(value: string, columns: number): string {
@@ -487,7 +496,7 @@ function baseTuiActivityLine(state: TuiActivityState, columns: number): string {
 		return `${bullet} ${warning("Paused")} ${dim("(/resume to continue)")}${queue}`;
 	}
 	if (queuedCount > 0) return `${bullet} ${muted("Queued")} ${dim(`(${queuedCount} waiting)`)}`;
-	return `${bullet} ${muted("Ready")}`;
+	return state.metrics ? muted(activityDetail(state.metrics, columns)) : "";
 }
 
 export function formatTuiStatusLine(
@@ -499,12 +508,12 @@ export function formatTuiStatusLine(
 	return formatTuiActivityLine({ status, detail, queuedCount, activeCount });
 }
 
-export type TuiCtrlCAction = "cancel-active" | "clear-input" | "arm-exit" | "exit";
+export type TuiCtrlCAction = "cancel-active" | "clear-input" | "exit";
 
-export function resolveCtrlCAction(inputText: string, activeWork: boolean, exitArmed: boolean): TuiCtrlCAction {
+export function resolveCtrlCAction(inputText: string, activeWork: boolean): TuiCtrlCAction {
 	if (activeWork) return "cancel-active";
 	if (inputText) return "clear-input";
-	return exitArmed ? "exit" : "arm-exit";
+	return "exit";
 }
 
 const HELP_COMMAND_GROUPS = [
@@ -552,7 +561,7 @@ export async function runTui(input: {
 			readonly requestApproval: (proposal: CodingTaskPatchProposal) => Promise<boolean>;
 			readonly signal: AbortSignal;
 		},
-		selectedModel: { readonly provider: string; readonly model: string },
+		selectedModel: { readonly provider: string; readonly model: string; readonly sessionId?: string },
 	) => Promise<unknown>;
 	readonly resumeTask: (
 		projectRoot: string,
@@ -611,8 +620,8 @@ export async function runTui(input: {
 	let activeTuiRequestId: string | undefined;
 	let activeTuiRequestHandedOff = false;
 	let active = true;
-	let ctrlCExitArmed = false;
 	let canceledActive = false;
+	const agentSessionIds = new Map<string, string>();
 	let finish!: () => void;
 	const closed = new Promise<void>((resolve) => {
 		finish = resolve;
@@ -620,6 +629,9 @@ export async function runTui(input: {
 
 	let latestContextTokens: number | undefined;
 	let latestCacheHitRatio: number | undefined;
+	let latestMetricsLine: string | undefined;
+	let metricsScope: string | undefined;
+	let cacheReadHighWater = 0;
 	const chromeState = (): TuiViewState => ({
 		projectRoot,
 		provider,
@@ -682,15 +694,19 @@ export async function runTui(input: {
 		workspace.chats.some((chat) => chat.status === "running" || chat.status === "paused" || chat.status === "queued");
 	const updateChrome = (detail = "") => {
 		status.setText(
-			formatTuiActivityLine({
-				status: phase,
-				detail,
-				queuedCount: queuedRequests.length,
-				activeCount: activeTaskCount(),
-				resumable: hasResumableChat(),
-				canceled: canceledActive,
-				detachedNew: detachedNewCount,
-			}),
+			formatTuiActivityLine(
+				{
+					status: phase,
+					detail,
+					queuedCount: queuedRequests.length,
+					activeCount: activeTaskCount(),
+					resumable: hasResumableChat(),
+					canceled: canceledActive,
+					detachedNew: detachedNewCount,
+					metrics: latestMetricsLine,
+				},
+				process.stdout.columns || 120,
+			),
 		);
 		updateHeader();
 		ui.requestRender();
@@ -728,18 +744,21 @@ export async function runTui(input: {
 			transcriptEntries[index] = entry;
 			ui.requestRender();
 		},
-		(index, entry) => {
-			transcriptEntries.splice(index, 0, entry);
-			ui.requestRender();
-		},
 	);
 
 	updateChrome();
 
 	const onTaskEvent = (event: CodingTaskEvent) => {
 		if (event.type === "session.started") {
+			const nextMetricsScope = `${event.sessionId}\u0000${event.provider}\u0000${event.model}`;
+			if (metricsScope !== nextMetricsScope) {
+				metricsScope = nextMetricsScope;
+				cacheReadHighWater = 0;
+				latestCacheHitRatio = undefined;
+			}
 			provider = event.provider;
 			model = event.model;
+			agentSessionIds.set(projectRoot, event.sessionId);
 			updateChrome();
 			if (activeTuiRequestId && !activeTuiRequestHandedOff) {
 				database.completeTuiRequest(activeTuiRequestId, "completed");
@@ -748,8 +767,19 @@ export async function runTui(input: {
 			}
 		} else if (event.type === "model.completed") {
 			if (event.usage.input !== null) latestContextTokens = event.usage.input;
-			assistantFlow.noteThought(`Thought: ${seconds(event.durationMs)}`);
-			assistantFlow.noteMetrics(formatResponseMetrics({ ...event.usage, durationMs: event.durationMs }));
+			cacheReadHighWater = Math.max(cacheReadHighWater, event.usage.cacheRead ?? 0);
+			latestMetricsLine = formatResponseMetrics({
+				...event.usage,
+				cacheReadHighWater,
+				durationMs: event.durationMs,
+			});
+			if (event.usage.input !== null && event.usage.cacheRead !== null && event.usage.cacheRead > 0) {
+				if (cacheReadHighWater > 0) {
+					latestCacheHitRatio = Math.min(1, Math.max(0, event.usage.cacheRead / cacheReadHighWater));
+				}
+			} else {
+				latestCacheHitRatio = undefined;
+			}
 		} else if (event.type === "capability.started") {
 			updateChrome(`${event.capability}…`);
 		} else if (event.type === "capability.completed") {
@@ -788,6 +818,7 @@ export async function runTui(input: {
 		const previousPatchId = workspace.patches[0]?.id;
 		phase = "running";
 		canceledActive = false;
+		latestMetricsLine = undefined;
 		activeTuiRequestId = request?.id;
 		activeTuiRequestHandedOff = false;
 		assistantFlow.reset();
@@ -802,7 +833,11 @@ export async function runTui(input: {
 			};
 			const result = resume
 				? await input.resumeTask(projectRoot, resumeSessionId || undefined, hooks)
-				: await input.runTask(projectRoot, request?.objective ?? "", hooks, { provider, model });
+				: await input.runTask(projectRoot, request?.objective ?? "", hooks, {
+						provider,
+						model,
+						...(agentSessionIds.get(projectRoot) ? { sessionId: agentSessionIds.get(projectRoot) } : {}),
+					});
 			if (resume && result === undefined) {
 				phase = "ready";
 				appendText(muted("No durable checkpoint is available."));
@@ -1327,6 +1362,7 @@ export async function runTui(input: {
 				return;
 			}
 			if (command === "new") {
+				agentSessionIds.delete(projectRoot);
 				updateChrome();
 				return;
 			}
@@ -1363,10 +1399,8 @@ export async function runTui(input: {
 			const action = resolveCtrlCAction(
 				editor.getText(),
 				Boolean(activeExecution || desktopOperation || approvalResolve),
-				ctrlCExitArmed,
 			);
 			if (action === "cancel-active") {
-				ctrlCExitArmed = false;
 				canceledActive = true;
 				activeController?.abort();
 				desktopController?.abort();
@@ -1377,22 +1411,16 @@ export async function runTui(input: {
 					resolve(false);
 				}
 				phase = "ready";
-				appendText(warning("Canceled active work. Ready."));
+				appendText(warning("Canceled active work."));
 				updateChrome();
 			} else if (action === "clear-input") {
-				ctrlCExitArmed = false;
 				editor.setText("");
-				updateChrome();
-			} else if (action === "arm-exit") {
-				ctrlCExitArmed = true;
-				appendText(muted("Press Ctrl+C again to exit, or use /exit."));
 				updateChrome();
 			} else {
 				requestExit();
 			}
 			return { consume: true };
 		}
-		ctrlCExitArmed = false;
 		if (approvalResolve && (value.toLowerCase() === "y" || value.toLowerCase() === "n")) {
 			const resolve = approvalResolve;
 			const kind = approvalKind;
