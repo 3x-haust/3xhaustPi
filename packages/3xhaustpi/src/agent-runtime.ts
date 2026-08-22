@@ -161,6 +161,12 @@ export async function runAgentTask(request: AgentTaskRequest): Promise<AgentTask
 			if (assistantStartedAt !== undefined) {
 				assistantElapsedMs += Math.max(0, performance.now() - assistantStartedAt);
 			}
+			const assistantText = event.message.content
+				.flatMap((content) => (content.type === "text" ? [content.text] : []))
+				.join("");
+			if (assistantText.trim().length > 0) {
+				request.onEvent({ type: "assistant.message", text: assistantText });
+			}
 			const usage = usageOf(event.message);
 			inputTokens += usage.input ?? 0;
 			outputTokens += usage.output ?? 0;

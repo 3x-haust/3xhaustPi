@@ -3,6 +3,7 @@ const ESCAPE = "\u001b";
 
 const tone = (code: number, value: string) => `${ESC}38;5;${code}m${value}${ESC}0m`;
 const style = (code: string, value: string) => `${ESC}${code}m${value}${ESC}0m`;
+const GRAYSCALE_SHIMMER = [239, 239, 242, 245, 250, 245, 242, 239] as const;
 
 export const accent = (value: string) => tone(111, value);
 export const text = (value: string) => tone(255, value);
@@ -13,6 +14,19 @@ export const warning = (value: string) => tone(214, value);
 export const failure = (value: string) => tone(203, value);
 export const italic = (value: string) => style("3", value);
 export const emphasis = (value: string) => style("1;3", value);
+
+export function grayscaleShimmer(value: string, frame: number): string {
+	const offset =
+		((Math.floor(frame) % GRAYSCALE_SHIMMER.length) + GRAYSCALE_SHIMMER.length) % GRAYSCALE_SHIMMER.length;
+	return Array.from(value)
+		.map((character, index) =>
+			tone(
+				GRAYSCALE_SHIMMER[(index - offset + GRAYSCALE_SHIMMER.length) % GRAYSCALE_SHIMMER.length] ?? 239,
+				character,
+			),
+		)
+		.join("");
+}
 
 export function sanitizeTerminalText(value: string): string {
 	const normalized = value.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").replace(/\t/gu, "    ");

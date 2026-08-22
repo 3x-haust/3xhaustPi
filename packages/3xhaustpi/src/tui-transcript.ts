@@ -154,8 +154,7 @@ function messageCard(value: string, columns: number): string[] {
 		const rows = physicalLines
 			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
 			.map((line) => promptSurfaceLine(`${bodyIndent}${line}`, columns));
-		if (columns >= 80) return [promptSurfaceLine("", columns), ...rows, promptSurfaceLine("", columns)];
-		if (columns >= 40) return [...rows, promptSurfaceLine("", columns)];
+		if (columns >= 40) return [promptSurfaceLine("", columns), ...rows, promptSurfaceLine("", columns)];
 		return rows;
 	}
 	if (role === "threeXhaust") {
@@ -164,7 +163,7 @@ function messageCard(value: string, columns: number): string[] {
 		const rows = physicalLines
 			.flatMap((physical) => wrapPlainLine(physical, contentWidth))
 			.map((line) => text(`${bodyIndent}${line}`));
-		return columns >= 80 ? ["", ...rows, ""] : [...rows, ""];
+		return columns >= 40 ? ["", ...rows, ""] : rows;
 	}
 	if (role === "thought") {
 		const contentWidth = Math.max(1, columns - cellWidth(gutter));

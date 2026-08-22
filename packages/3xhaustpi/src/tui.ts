@@ -31,6 +31,7 @@ import {
 	ellipsizeCells,
 	failure,
 	frameLine,
+	grayscaleShimmer,
 	muted,
 	sanitizeTerminalText,
 	stripAnsi,
@@ -463,6 +464,7 @@ function editorTheme() {
 export interface TuiActivityState {
 	readonly status: TuiViewState["status"];
 	readonly detail?: string;
+	readonly animationFrame?: number;
 	readonly activeCount?: number;
 	readonly queuedCount?: number;
 	readonly resumable?: boolean;
@@ -495,6 +497,9 @@ function baseTuiActivityLine(state: TuiActivityState, columns: number): string {
 	if (state.status === "running" || activeCount > 0) {
 		const target = detail || (activeCount > 1 ? `${activeCount} active` : "");
 		const suffix = target ? `${target} ${dim("·")} esc to interrupt` : "esc to interrupt";
+		if (state.animationFrame !== undefined) {
+			return `${bullet} ${grayscaleShimmer(`Working (${stripAnsi(suffix)})`, state.animationFrame)}`;
+		}
 		return `${bullet} ${text("Working")} ${dim(`(${suffix})`)}`;
 	}
 	if (state.resumable) {
@@ -637,6 +642,9 @@ export async function runTui(input: {
 	let latestMetricsLine: string | undefined;
 	let metricsScope: string | undefined;
 	let cacheReadHighWater = 0;
+	let workAnimationFrame = 0;
+	const workMotionEnabled =
+		process.env.NO_COLOR === undefined && process.env.TERM !== "dumb" && process.env.REDUCE_MOTION !== "1";
 	const chromeState = (): TuiViewState => ({
 		projectRoot,
 		provider,
@@ -709,6 +717,9 @@ export async function runTui(input: {
 					canceled: canceledActive,
 					detachedNew: detachedNewCount,
 					metrics: latestMetricsLine,
+					...(workMotionEnabled && (phase === "running" || activeTaskCount() > 0)
+						? { animationFrame: workAnimationFrame }
+						: {}),
 				},
 				process.stdout.columns || 120,
 			),
@@ -716,6 +727,14 @@ export async function runTui(input: {
 		updateHeader();
 		ui.requestRender();
 	};
+	const workAnimationTimer = workMotionEnabled
+		? setInterval(() => {
+				if (phase !== "running" && activeTaskCount() === 0) return;
+				workAnimationFrame = (workAnimationFrame + 1) % 8;
+				updateChrome();
+			}, 120)
+		: undefined;
+	workAnimationTimer?.unref();
 	const refreshQueue = () => {
 		queuedRequests = database.listTuiRequests(projectRoot).filter((request) => request.status === "queued");
 		updateChrome();
@@ -1432,5 +1451,6 @@ export async function runTui(input: {
 	ui.start();
 	drainQueue();
 	await closed;
+	if (workAnimationTimer) clearInterval(workAnimationTimer);
 	database.close();
 }

@@ -10,7 +10,7 @@ made of boxes nor a decorative chatbot.
 - Voice: concise, direct, operational
 - Signature: a cool blue-violet accent used sparingly for focus and active work
 - Hierarchy: prompt surface first, text luminance second, semantic color last
-- Shape language: full-width prompt bands, open prose, and one composer rule
+- Shape language: full-width prompt bands, open prose, and a double-rule composer shell
 - Density: transcript-first with progressive disclosure at narrow widths
 
 ## 2. Color
@@ -87,11 +87,12 @@ One terminal cell horizontally and one terminal row vertically.
 
 The root uses one vertical shell:
 
-1. **Context title:** fixed, one quiet row.
-2. **Transcript:** owns all remaining vertical space and scrolls/reflows.
-3. **Activity:** fixed, one row.
-4. **Composer:** fixed, one rule plus the `>` input row; autocomplete reserves
-   its own bounded rows.
+1. **Transcript:** owns all remaining vertical space and scrolls/reflows.
+2. **Activity:** fixed, one row.
+3. **Composer:** fixed, a top rule, the `>` input row, and a bottom rule;
+   autocomplete reserves its own bounded rows.
+4. **Context title:** fixed, one quiet row below the composer.
+5. **Identity:** fixed, one product/workspace row at the shell bottom.
 
 ### Responsive Modes
 
@@ -143,10 +144,10 @@ or transcript budget.
 | Surface | Wide/full | Compact | Minimal/degraded |
 | --- | --- | --- | --- |
 | title | product, project, model | product and project | product |
-| user prompt | empty tint row, content, empty tint row | content plus one tint row | content row only |
+| user prompt | empty tint row, content, empty tint row | empty tint row, content, empty tint row | content row only |
 | thought | duration and work summary | duration | hide before answer |
 | answer | readable capped measure | terminal measure | terminal measure |
-| metrics | throughput, cache, duration | cache and duration | duration |
+| metrics | throughput, cache, duration | throughput, cache, duration when they fit | duration |
 | activity | state, target, interrupt key | state and target | state |
 | composer | top rule plus `>` input | same | same |
 
@@ -156,6 +157,7 @@ or transcript budget.
 
 - One product label only: no duplicated `3xhaustPi` project name.
 - Owns only product and workspace identity.
+- Anchors the final shell row below the context title and composer.
 - Full/compact: `3xhaustPi  ·  project`
 - Minimal: `3xhaustPi`
 - Model and run state never repeat here.
@@ -166,12 +168,15 @@ or transcript budget.
 - Submitted prompts are full-width `prompt-surface` bands. The surface, not a
   speaker name, identifies the user role. `You`, `User`, `3xhaust`, and generic
   assistant labels never render.
-- Wide prompt bands use an empty surface row above and below the prompt.
-  Compact bands retain the same tint while dropping empty rows before content.
-- Wide assistant output uses one terminal-background row above and below bright
-  answer prose. Compact output drops the leading empty row.
+- Wide and compact prompt bands use an empty surface row above and below the
+  prompt. Minimal and degraded modes may collapse these rows before content.
+- Wide and compact assistant output uses one terminal-background row above and
+  below bright answer prose. Minimal output may collapse the leading row.
 - Adjacent prompt/answer margins collapse to one visible row; conversation
   bodies never accumulate a two-row gap.
+- Prompt, durable work, answer, and response telemetry bodies use the same
+  one-row semantic boundary. Work rows never touch answer prose, and telemetry
+  never touches the final answer body.
 - Leading and trailing newlines in persisted message text are normalized before
   card margins are added, so message payload whitespace cannot double a boundary.
 - Runtime telemetry stays in the idle activity row and never enters the
@@ -194,6 +199,8 @@ or transcript budget.
 
 ```text
 [full-width tinted user prompt]
+
+✓ capability · duration · summary
 
 Bright assistant answer with no speaker label.
 
@@ -247,7 +254,8 @@ output is capped at 100 lines and ends with an omitted-line count.
 - Owns current ephemeral execution state; no other rail repeats it.
 - Ready before the first response: blank; command discovery stays behind `/help`.
 - Ready after a response: measured `TPS`, cache-hit ratio, and duration.
-- Running: `• Working (<detail> · esc to interrupt)`, never spinner-only.
+- Running: `• Working (<detail> · esc to interrupt)`, never spinner-only. A
+  grayscale shimmer sweeps only this activity text while work is active.
 - Review: approval action and key choices.
 - Queued: count remains visible without flooding the transcript.
 - Detached scroll: new-output count and return-to-latest key.
@@ -271,8 +279,8 @@ selects the next active sibling; it never leaves a stale target.
 - Always visually focused with a leading `>`.
 - Empty state is an unlabeled hardware cursor, matching a native shell prompt.
 - `/` opens command discovery; command and model tokens remain intact.
-- A single accent-tinted top rule separates the composer. There is no bottom
-  border and no decorative side rail.
+- Matching full-width rules above and below the input create a stable
+  double-rule shell. There is no decorative side rail.
 
 ### Command / Model Picker
 
@@ -295,7 +303,8 @@ selects the next active sibling; it never leaves a stale target.
   appended user/assistant suffix tokens are not cache misses. Cold turns omit
   the cache field instead of displaying a meaningless `0.0%`.
 - Full/wide: throughput, cache-hit ratio, and duration when measured.
-- Compact: cache-hit ratio and duration.
+- Compact: throughput, cache-hit ratio, and duration remain together when the
+  complete line fits; lower-priority segments collapse only on overflow.
 - Minimal/degraded: duration only.
 - Missing measurements disappear; the UI never invents telemetry.
 
@@ -318,8 +327,8 @@ selects the next active sibling; it never leaves a stale target.
 | no models/no matches | picker empty state | unchanged | picker owns input | none | edit query or `Esc` |
 | transcript detached | durable feed unchanged | `↓ N new · Alt+End latest` | enabled | none | transcript keys only when composer empty |
 
-An event has one primary surface. Durable facts and measured response telemetry
-go to the transcript; ephemeral work goes to activity.
+An event has one primary surface. Durable conversation facts go to the
+transcript; measured response telemetry and ephemeral work go to activity.
 
 The `agent active` transition exposes no dedicated detail picker in this
 redesign; the durable work row is the only agent detail surface.
@@ -328,12 +337,18 @@ redesign; the durable work row is the only agent detail surface.
 
 ### Timing
 
-Terminal rendering is event-driven; no decorative animation is introduced.
+Terminal rendering remains event-driven except for one state-signaling motion:
+active work advances a grayscale luminance sweep every 120 ms. The sweep uses
+the neutral ramp `text-ghost → disabled → text-muted → text-secondary` and
+never changes glyphs, width, or row ownership.
 
 ### Rules
 
 - Differential redraws must not scroll fixed chrome.
-- Running work may use a subtle changing glyph only alongside a text state.
+- Running work uses a subtle grayscale text shimmer only alongside the explicit
+  `Working` state. It stops immediately when no foreground work remains.
+- `NO_COLOR`, `TERM=dumb`, or `REDUCE_MOTION=1` renders the same complete
+  `Working` text statically with no timer.
 - Completed, failed, and approval states update immediately on exact events.
 - `Ctrl+C` clears a non-empty composer. With an empty composer it aborts active
   work, reaps the runtime worker, and exits in one keypress with code 0.
@@ -352,8 +367,8 @@ Terminal rendering is event-driven; no decorative animation is introduced.
 
 - Wide/full: prompt bands span the terminal; answer prose remains capped to a
   readable measure; complete response metrics may share one row.
-- Compact: prompt tint remains full width; metrics drop throughput before
-  wrapping.
+- Compact: prompt tint remains full width; complete response metrics remain
+  together when they fit and collapse only before wrapping.
 - Minimal: prompt band keeps content only; answer remains unlabeled.
 - Degraded: prompt tint may flatten to one row but roles remain distinguishable.
 - Continuation prose aligns to the answer gutter without a role label.
